@@ -22,6 +22,9 @@ librenms:
           name: librenms-redis-secret
           key: redis-password
 
+  # 額外環境變數來源（從 ConfigMap 或 Secret 載入）
+  extraEnvFrom: []
+
   # Frontend 配置
   frontend:
     replicas: 1
