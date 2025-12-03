@@ -88,11 +88,249 @@ librenms-mariadb-secret    Opaque   2      1m
 librenms-redis-secret      Opaque   1      1m
 ```
 
-### 步驟 4：配置 Ingress
+### 步驟 4：配置存儲（StorageClass）
 
-根據您的環境修改 `values.yaml` 或環境特定檔案中的 Ingress 配置。
+根據您的環境設定適當的 StorageClass。查看可用的 StorageClass：
 
-### 步驟 5：透過 Rancher Fleet 部署
+```bash
+kubectl get storageclass
+```
+
+範例輸出：
+```
+NAME                   PROVISIONER                                             RECLAIMPOLICY   VOLUMEBINDINGMODE   ALLOWVOLUMEEXPANSION   AGE
+local-path (default)   rancher.io/local-path                                   Delete          WaitForFirstConsumer   false                  8d
+nfs-client             cluster.local/nfs-subdir-external-provisioner           Delete          Immediate              true                   7d
+```
+
+修改 `values.yaml` 中的 `storageClass` 設定：
+
+```yaml
+# 持久化存儲 - LibreNMS 主應用
+persistence:
+  enabled: true
+  storageClass: "nfs-client"  # 使用 NFS StorageClass
+  size: 5Gi
+
+# 資料庫配置
+mariadb:
+  primary:
+    persistence:
+      enabled: true
+      storageClass: "nfs-client"  # 使用 NFS StorageClass
+      size: 10Gi
+
+# Redis 配置
+redis:
+  master:
+    persistence:
+      storageClass: "nfs-client"  # 使用 NFS StorageClass
+```
+
+> **提示**：如果使用 `local-path`（預設），資料只會存在於特定節點上。建議生產環境使用 NFS 或其他分散式存儲。
+
+### 步驟 5：配置 Ingress
+
+#### 5.0 前置準備：Ingress Controller
+
+本專案使用 NGINX Ingress Controller。如果您的 K3s 環境尚未安裝，請依照以下步驟設定。
+
+##### K3s 禁用 Traefik 並安裝 NGINX Ingress
+
+**方式一：新安裝 K3s 時禁用 Traefik**
+
+```bash
+# Server 節點安裝
+curl -sfL https://get.k3s.io | sh -s - server --disable traefik
+
+# 或使用配置檔 /etc/rancher/k3s/config.yaml
+# disable:
+#   - traefik
+```
+
+**方式二：現有 K3s 叢集禁用 Traefik**
+
+```bash
+# 1. 編輯 K3s 配置
+sudo vi /etc/rancher/k3s/config.yaml
+
+# 加入以下內容：
+# disable:
+#   - traefik
+
+# 2. 重啟 K3s
+sudo systemctl restart k3s
+
+# 3. 移除現有的 Traefik
+kubectl delete helmchart traefik traefik-crd -n kube-system
+```
+
+##### 安裝 NGINX Ingress Controller
+
+**使用 Helm 安裝：**
+
+```bash
+# 添加 Helm repo
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update
+
+# 建立命名空間
+kubectl create namespace ingress-nginx
+
+# 安裝 NGINX Ingress Controller
+helm install ingress-nginx ingress-nginx/ingress-nginx \
+  --namespace ingress-nginx \
+  --set controller.service.type=LoadBalancer \
+  --set controller.watchIngressWithoutClass=true
+```
+
+**驗證安裝：**
+
+```bash
+# 確認 Pod 運行中
+kubectl get pods -n ingress-nginx
+
+# 預期輸出
+# NAME                                        READY   STATUS    RESTARTS   AGE
+# ingress-nginx-controller-xxxxxxxxx-xxxxx   1/1     Running   0          1m
+
+# 確認 Service 已建立
+kubectl get svc -n ingress-nginx
+
+# 確認 IngressClass 已建立
+kubectl get ingressclass
+# NAME    CONTROLLER             PARAMETERS   AGE
+# nginx   k8s.io/ingress-nginx   <none>       1m
+```
+
+##### 確認目前使用的 Ingress Controller
+
+```bash
+# 查看所有 IngressClass
+kubectl get ingressclass
+
+# 查看 Ingress Controller Pods
+kubectl get pods -A | grep -E "(ingress|traefik)"
+
+# 範例輸出（使用 NGINX）：
+# ingress-nginx   ingress-nginx-controller-xxxxx   1/1   Running   0   7d
+```
+
+---
+
+#### 5.1 前置準備：TLS 憑證
+
+如果需要啟用 HTTPS，必須先建立 TLS Secret。
+
+**方式一：使用現有的 Wildcard 憑證**
+
+如果您有 wildcard 憑證（例如 `*.k3s.ichiayi.com`），可以將憑證複製到 librenms 命名空間：
+
+```bash
+# 假設憑證已存在於 default 命名空間
+kubectl get secret wildcard-k3s-ichiayi-com-tls -n default -o yaml | \
+  sed 's/namespace: default/namespace: librenms/' | \
+  kubectl apply -f -
+
+# 或直接建立
+kubectl create secret tls wildcard-k3s-ichiayi-com-tls \
+  --namespace librenms \
+  --cert=/path/to/tls.crt \
+  --key=/path/to/tls.key
+```
+
+**方式二：使用 cert-manager 自動簽發**
+
+如果已安裝 cert-manager，可以建立 Certificate 資源：
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: librenms-tls
+  namespace: librenms
+spec:
+  secretName: librenms-tls
+  issuerRef:
+    name: letsencrypt-prod  # 您的 ClusterIssuer 名稱
+    kind: ClusterIssuer
+  dnsNames:
+    - nms.k3s.ichiayi.com
+```
+
+**方式三：暫時不使用 TLS（開發環境）**
+
+```yaml
+ingress:
+  tls: []  # 留空即可
+```
+
+#### 5.2 驗證 TLS Secret 已建立
+
+```bash
+kubectl get secrets -n librenms | grep tls
+
+# 預期輸出
+# wildcard-k3s-ichiayi-com-tls   kubernetes.io/tls   2      7d
+```
+
+#### 5.3 配置 Ingress
+
+修改 `values.yaml` 中的 Ingress 配置：
+
+```yaml
+ingress:
+  enabled: true
+  className: "nginx"  # 或 "traefik"，依您的環境
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    # 允許較大的檔案上傳（LibreNMS 可能需要）
+    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+    # 設定是否強制 SSL 重導向
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+  hosts:
+    - host: nms.k3s.ichiayi.com  # 修改為您的域名
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: wildcard-k3s-ichiayi-com-tls  # TLS Secret 名稱
+      hosts:
+        - nms.k3s.ichiayi.com
+```
+
+#### 5.4 常用 Ingress Annotations
+
+| Annotation | 用途 | 範例值 |
+|-----------|------|--------|
+| `nginx.ingress.kubernetes.io/proxy-body-size` | 最大上傳檔案大小 | `64m` |
+| `nginx.ingress.kubernetes.io/ssl-redirect` | 是否強制 HTTPS | `true` / `false` |
+| `nginx.ingress.kubernetes.io/proxy-read-timeout` | 讀取超時時間 | `300` |
+| `nginx.ingress.kubernetes.io/proxy-send-timeout` | 發送超時時間 | `300` |
+| `nginx.ingress.kubernetes.io/whitelist-source-range` | IP 白名單 | `10.0.0.0/8` |
+
+#### 5.5 使用 Traefik（k3s 預設）
+
+如果您使用 k3s 預設的 Traefik Ingress Controller：
+
+```yaml
+ingress:
+  enabled: true
+  className: "traefik"
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+  hosts:
+    - host: nms.k3s.ichiayi.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: wildcard-k3s-ichiayi-com-tls
+      hosts:
+        - nms.k3s.ichiayi.com
+```
+
+### 步驟 6：透過 Rancher Fleet 部署
 
 詳見下方「透過 Rancher Fleet 部署」章節。
 

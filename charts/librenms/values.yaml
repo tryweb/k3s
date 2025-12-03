@@ -30,7 +30,7 @@ resources:
 # 持久化存儲
 persistence:
   enabled: true
-  storageClass: ""  # 使用預設 StorageClass
+  storageClass: "nfs-client"  # 使用 NFS StorageClass
   size: 5Gi
 
 # 資料庫配置 (內建 MariaDB)
@@ -45,6 +45,7 @@ mariadb:
   primary:
     persistence:
       enabled: true
+      storageClass: "nfs-client"  # 使用 NFS StorageClass
       size: 10Gi
 
 # Redis 配置
@@ -55,18 +56,27 @@ redis:
     enabled: true
     existingSecret: librenms-redis-secret
     existingSecretPasswordKey: redis-password
+  master:
+    persistence:
+      storageClass: "nfs-client"  # 使用 NFS StorageClass
 
 # Ingress 配置
 ingress:
   enabled: true
-  className: "traefik"  # k3s 預設使用 traefik
-  annotations: {}
+  className: "nginx"
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
   hosts:
-    - host: librenms.local
+    - host: nms.k3s.ichiayi.com
       paths:
         - path: /
           pathType: Prefix
-  tls: []
+  tls:
+    - secretName: wildcard-k3s-ichiayi-com-tls
+      hosts:
+        - nms.k3s.ichiayi.com
 
 # 服務配置
 service:
