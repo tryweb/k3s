@@ -21,7 +21,7 @@ charts/librenms/
 echo "base64:$(head -c 32 /dev/urandom | base64)"
 ```
 
-將生成的密鑰填入 `values.yaml` 的 `appKey` 欄位。
+將生成的密鑰填入 `values.yaml` 的 `librenms.appkey` 欄位。
 
 ### 2. 修改敏感資訊
 
