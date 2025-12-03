@@ -13,7 +13,7 @@ librenms:
   # 實際密鑰從 Secret 載入（需要先建立 Secret: librenms-app-secret）
   # Secret 中必須包含 key 名為 "appkey" 的資料
   existingSecret: librenms-app-secret
-  
+
   # 額外環境變數（從 Secret 載入 Redis 密碼）
   extraEnvs:
     - name: REDIS_PASSWORD
@@ -21,7 +21,7 @@ librenms:
         secretKeyRef:
           name: librenms-redis-secret
           key: redis-password
-  
+
   # Frontend 配置
   frontend:
     replicas: 1
@@ -34,6 +34,17 @@ librenms:
       # limits:
       #   memory: "1Gi"
       #   cpu: "500m"
+
+  # SNMP Scanner 配置
+  # 用於自動發現網路設備（需要在 LibreNMS Web UI 中啟用 SNMP network discovery）
+  snmp_scanner:
+    enabled: true
+    # Cron 排程（預設每小時第 15 分鐘執行）
+    cron: "15 * * * *"
+    resources: {}
+    nodeSelector: {}
+    extraEnvs: []
+    extraEnvFrom: []
 
 # 持久化存儲
 persistence:
