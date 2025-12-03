@@ -50,6 +50,18 @@ mysql:
       storageClass: "nfs-client"  # 使用 NFS StorageClass
       size: 10Gi
 
+# RRDcached 配置
+# 用於 RRD 資料快取，提升效能
+rrdcached:
+  enabled: true
+  persistence:
+    rrd:
+      storageClass: "nfs-client"  # 使用 NFS StorageClass
+      size: 5Gi
+    journal:
+      storageClass: "nfs-client"  # 使用 NFS StorageClass
+      size: 1Gi
+
 # Redis 配置
 # 密碼使用 existingSecret 引用，不存放在 Git 中
 redis:
