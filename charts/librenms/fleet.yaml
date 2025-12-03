@@ -12,14 +12,19 @@ helm:
   # 指定版本 - 重要：需要定期檢查並更新此版本號
   # 查看最新版本: helm search repo librenms/librenms --versions
   version: ""  # 留空使用最新版本，或指定如 "1.0.0"
-  
+
+  # 明確指定 Helm release 名稱
+  # 這會影響 LibreNMS poller 尋找的 MySQL Secret 名稱（<releaseName>-mysql）
+  # 若不指定，Fleet 會自動生成：<GitRepo名稱>-<路徑>（可能很長且難以預測）
+  releaseName: librenms
+
   # 值檔案路徑（相對於此 fleet.yaml）
   valuesFiles:
     - values.yaml
-  
+
   # 強制升級（解決某些 CRD 問題）
   force: false
-  
+
   # 等待所有 Pod 就緒
   waitForJobs: true
 

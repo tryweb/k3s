@@ -11,6 +11,8 @@ charts/librenms/
 ├── values.yaml            # 基礎 Helm values
 ├── values-production.yaml # 生產環境覆蓋配置
 ├── values-staging.yaml    # 測試環境覆蓋配置
+├── scripts/
+│   └── create-secrets.sh  # Secret 自動建立腳本
 └── templates/
     └── secrets.yaml       # Secret 範例模板（參考用）
 ```
@@ -27,7 +29,33 @@ kubectl create namespace librenms
 
 ⚠️ **重要**：所有敏感資訊必須使用 Kubernetes Secret 管理，不可存放在 Git 中。
 
-#### 2.1 生成應用程式密鑰
+#### 方式一：使用自動化腳本（推薦）
+
+```bash
+cd charts/librenms/scripts
+
+# 使用預設值（release 名稱為 "librenms"，與 fleet.yaml 設定一致）
+./create-secrets.sh
+```
+
+> **注意**：本專案的 `fleet.yaml` 已明確設定 `helm.releaseName: librenms`，
+> 因此腳本預設值可直接使用。若您的環境有不同設定，可透過環境變數覆蓋：
+> ```bash
+> RELEASE_NAME=your-release-name ./create-secrets.sh
+> ```
+
+腳本會自動建立以下 Secrets：
+- `librenms-app-secret` - LibreNMS 應用程式密鑰
+- `librenms-mysql-secret` - MySQL 密碼（Bitnami chart 使用）
+- `<release-name>-mysql` - MySQL 密碼（LibreNMS poller 使用）
+- `librenms-redis-secret` - Redis 密碼
+
+#### 方式二：手動建立
+
+<details>
+<summary>點擊展開手動建立步驟</summary>
+
+##### 2.1 生成應用程式密鑰
 
 ```bash
 # 生成 LibreNMS 應用程式密鑰
@@ -35,7 +63,7 @@ APP_KEY=$(echo "base64:$(head -c 32 /dev/urandom | base64)")
 echo "Generated App Key: $APP_KEY"
 ```
 
-#### 2.2 建立 LibreNMS App Secret
+##### 2.2 建立 LibreNMS App Secret
 
 ```bash
 kubectl create secret generic librenms-app-secret \
@@ -43,14 +71,23 @@ kubectl create secret generic librenms-app-secret \
   --from-literal=appkey="$APP_KEY"
 ```
 
-#### 2.3 建立 MySQL Secret
+##### 2.3 建立 MySQL Secret
 
 ```bash
 # 生成隨機密碼（或使用您自己的密碼）
 MYSQL_ROOT_PASSWORD=$(openssl rand -base64 24)
 MYSQL_PASSWORD=$(openssl rand -base64 24)
 
+# Bitnami MySQL chart 使用的 Secret
 kubectl create secret generic librenms-mysql-secret \
+  --namespace librenms \
+  --from-literal=mysql-root-password="$MYSQL_ROOT_PASSWORD" \
+  --from-literal=mysql-password="$MYSQL_PASSWORD"
+
+# LibreNMS poller 使用的 Secret（名稱必須是 <release-name>-mysql）
+# 本專案 fleet.yaml 已設定 releaseName: librenms
+RELEASE_NAME="librenms"
+kubectl create secret generic "${RELEASE_NAME}-mysql" \
   --namespace librenms \
   --from-literal=mysql-root-password="$MYSQL_ROOT_PASSWORD" \
   --from-literal=mysql-password="$MYSQL_PASSWORD"
@@ -60,7 +97,7 @@ echo "MySQL Root Password: $MYSQL_ROOT_PASSWORD"
 echo "MySQL User Password: $MYSQL_PASSWORD"
 ```
 
-#### 2.4 建立 Redis Secret
+##### 2.4 建立 Redis Secret
 
 ```bash
 # 生成隨機密碼（或使用您自己的密碼）
@@ -74,6 +111,8 @@ kubectl create secret generic librenms-redis-secret \
 echo "Redis Password: $REDIS_PASSWORD"
 ```
 
+</details>
+
 ### 步驟 3：驗證 Secrets 已建立
 
 ```bash
@@ -85,6 +124,7 @@ kubectl get secrets -n librenms
 NAME                       TYPE     DATA   AGE
 librenms-app-secret        Opaque   1      1m
 librenms-mysql-secret      Opaque   2      1m
+librenms-mysql             Opaque   2      1m
 librenms-redis-secret      Opaque   1      1m
 ```
 
@@ -343,54 +383,32 @@ ingress:
 | Secret 名稱 | 用途 | 必要欄位 |
 |------------|------|---------|
 | `librenms-app-secret` | LibreNMS 應用程式密鑰 | `appkey` |
-| `librenms-mysql-secret` | MySQL 資料庫密碼 | `mysql-root-password`, `mysql-password` |
+| `librenms-mysql-secret` | MySQL 資料庫密碼（Bitnami chart） | `mysql-root-password`, `mysql-password` |
+| `<release-name>-mysql` | MySQL 資料庫密碼（LibreNMS poller） | `mysql-root-password`, `mysql-password` |
 | `librenms-redis-secret` | Redis 密碼 | `redis-password` |
+
+> **⚠️ 重要**：LibreNMS 官方 Helm chart 的 poller 組件硬編碼使用 `{{ .Release.Name }}-mysql` 作為 Secret 名稱，
+> 因此必須額外建立一個符合此命名規則的 Secret。使用 `scripts/create-secrets.sh` 腳本可自動處理此問題。
 
 ### 一鍵建立所有 Secrets（快速設定）
 
+使用專案提供的腳本自動建立所有必要的 Secrets：
+
 ```bash
-#!/bin/bash
-# 快速建立所有 LibreNMS Secrets 腳本
+cd charts/librenms/scripts
 
-NAMESPACE="librenms"
+# 使用預設值執行（與 fleet.yaml 的 releaseName: librenms 一致）
+./create-secrets.sh
 
-# 建立命名空間
-kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
-
-# 生成密碼
-APP_KEY="base64:$(head -c 32 /dev/urandom | base64)"
-MYSQL_ROOT_PASSWORD=$(openssl rand -base64 24)
-MYSQL_PASSWORD=$(openssl rand -base64 24)
-REDIS_PASSWORD=$(openssl rand -base64 24)
-
-# 建立 Secrets
-kubectl create secret generic librenms-app-secret \
-  --namespace $NAMESPACE \
-  --from-literal=appkey="$APP_KEY" \
-  --dry-run=client -o yaml | kubectl apply -f -
-
-kubectl create secret generic librenms-mysql-secret \
-  --namespace $NAMESPACE \
-  --from-literal=mysql-root-password="$MYSQL_ROOT_PASSWORD" \
-  --from-literal=mysql-password="$MYSQL_PASSWORD" \
-  --dry-run=client -o yaml | kubectl apply -f -
-
-kubectl create secret generic librenms-redis-secret \
-  --namespace $NAMESPACE \
-  --from-literal=redis-password="$REDIS_PASSWORD" \
-  --dry-run=client -o yaml | kubectl apply -f -
-
-# 輸出密碼（請安全保存）
-echo "========================================"
-echo "Secrets created successfully!"
-echo "========================================"
-echo "App Key: $APP_KEY"
-echo "MySQL Root Password: $MYSQL_ROOT_PASSWORD"
-echo "MySQL User Password: $MYSQL_PASSWORD"
-echo "Redis Password: $REDIS_PASSWORD"
-echo "========================================"
-echo "⚠️  請將以上密碼安全保存！"
+# 或指定 namespace 和 release 名稱
+NAMESPACE=librenms RELEASE_NAME=librenms ./create-secrets.sh
 ```
+
+腳本會自動：
+1. 建立命名空間（如果不存在）
+2. 生成隨機密碼
+3. 建立所有必要的 Secrets（包含 poller 需要的 `<release-name>-mysql`）
+4. 輸出密碼供您保存
 
 ### 使用 Sealed Secrets（進階）
 
@@ -725,23 +743,50 @@ helm history librenms -n librenms
    ```bash
    # 確認 Secret 已建立
    kubectl get secrets -n librenms
-   
+
    # 檢查 Secret 內容（base64 編碼）
    kubectl get secret librenms-app-secret -n librenms -o yaml
    ```
 
-2. **同步失敗**
+2. **Poller 找不到 MySQL Secret（CreateContainerConfigError）**
+
+   錯誤訊息類似：`secret "<release-name>-mysql" not found`
+
+   **原因**：LibreNMS chart 的 poller 模板硬編碼使用 `{{ .Release.Name }}-mysql` 作為 Secret 名稱，
+   而不是使用 `mysql.auth.existingSecret` 設定的值。
+
+   **解決方案**：
+   ```bash
+   # 1. 查看實際的 release 名稱
+   helm list -n librenms
+
+   # 2. 從現有 Secret 取得密碼
+   MYSQL_PASSWORD=$(kubectl get secret librenms-mysql-secret -n librenms \
+     -o jsonpath='{.data.mysql-password}' | base64 -d)
+   MYSQL_ROOT_PASSWORD=$(kubectl get secret librenms-mysql-secret -n librenms \
+     -o jsonpath='{.data.mysql-root-password}' | base64 -d)
+
+   # 3. 建立 poller 需要的 Secret（本專案 fleet.yaml 已設定 releaseName: librenms）
+   kubectl create secret generic "librenms-mysql" \
+     --namespace librenms \
+     --from-literal=mysql-password="$MYSQL_PASSWORD" \
+     --from-literal=mysql-root-password="$MYSQL_ROOT_PASSWORD"
+   ```
+
+   **預防方式**：確保 `fleet.yaml` 中有設定 `helm.releaseName`，並使用 `scripts/create-secrets.sh` 腳本建立 Secrets。
+
+3. **同步失敗**
    ```bash
    kubectl logs -n cattle-fleet-system -l app=fleet-controller
    ```
 
-3. **Helm 安裝失敗**
+4. **Helm 安裝失敗**
    ```bash
    kubectl get pods -n librenms
    kubectl describe pod <pod-name> -n librenms
    ```
 
-4. **Values 合併問題**
+5. **Values 合併問題**
    ```bash
    # 測試 values 合併結果
    helm template librenms librenms/librenms \
@@ -749,7 +794,7 @@ helm history librenms -n librenms
      -f values-production.yaml
    ```
 
-5. **密碼錯誤**
+6. **密碼錯誤**
    ```bash
    # 查看 Pod 日誌
    kubectl logs -n librenms -l app.kubernetes.io/name=librenms
