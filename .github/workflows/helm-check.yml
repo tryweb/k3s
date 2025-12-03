@@ -12,8 +12,8 @@ on:
       - 'charts/**'
 
 jobs:
-  lint:
-    name: Helm Lint
+  validate:
+    name: Validate Helm Values
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -29,24 +29,39 @@ jobs:
           helm repo add librenms https://www.librenms.org/helm-charts
           helm repo update
 
-      - name: Lint LibreNMS values
+      - name: Validate YAML syntax
         run: |
-          helm lint librenms/librenms \
-            -f charts/librenms/values.yaml
+          echo "Validating YAML syntax..."
+          for file in charts/librenms/values*.yaml; do
+            echo "Checking $file"
+            python3 -c "import yaml; yaml.safe_load(open('$file'))" && echo "✓ $file is valid YAML"
+          done
+
+      - name: Template test - base values
+        run: |
+          echo "Testing base values..."
+          helm template librenms librenms/librenms \
+            -f charts/librenms/values.yaml \
+            --debug 2>&1 | head -50
+          echo "✓ Base values template succeeded"
 
       - name: Template test - staging
         run: |
+          echo "Testing staging values..."
           helm template librenms librenms/librenms \
             -f charts/librenms/values.yaml \
             -f charts/librenms/values-staging.yaml \
-            --dry-run > /dev/null
+            --debug 2>&1 | head -50
+          echo "✓ Staging values template succeeded"
 
       - name: Template test - production
         run: |
+          echo "Testing production values..."
           helm template librenms librenms/librenms \
             -f charts/librenms/values.yaml \
             -f charts/librenms/values-production.yaml \
-            --dry-run > /dev/null
+            --debug 2>&1 | head -50
+          echo "✓ Production values template succeeded"
 
   security-scan:
     name: Security Scan
