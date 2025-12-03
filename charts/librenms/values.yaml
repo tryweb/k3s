@@ -1,12 +1,16 @@
 # LibreNMS Helm Chart Values
 # 此檔案由 Git 管理，透過 Rancher Fleet 自動部署
 # 官方 Chart: https://github.com/librenms/helm-charts
+#
+# ⚠️  敏感資訊（密碼、密鑰）請使用 Kubernetes Secret 管理
+#     請參閱 README.md 的「敏感資訊管理」章節
 
 # LibreNMS 核心配置
 librenms:
-  # 應用程式密鑰 (請在部署前生成新的密鑰)
-  # 使用命令: echo "base64:$(head -c 32 /dev/urandom | base64)"
-  appkey: "base64:CHANGE_ME_GENERATE_NEW_KEY"
+  # 應用程式密鑰 - 使用 existingSecret 引用
+  # 需要先建立 Secret: librenms-app-secret
+  existingSecret: librenms-app-secret
+  existingSecretKey: appkey
 
 # 基本配置
 image:
@@ -30,24 +34,27 @@ persistence:
   size: 5Gi
 
 # 資料庫配置 (內建 MariaDB)
+# 密碼使用 existingSecret 引用，不存放在 Git 中
 mariadb:
   enabled: true
   auth:
-    rootPassword: "CHANGE_ME"
     database: librenms
     username: librenms
-    password: "CHANGE_ME"
+    # 使用預先建立的 Secret
+    existingSecret: librenms-mariadb-secret
   primary:
     persistence:
       enabled: true
       size: 10Gi
 
 # Redis 配置
+# 密碼使用 existingSecret 引用，不存放在 Git 中
 redis:
   enabled: true
   auth:
     enabled: true
-    password: "CHANGE_ME"
+    existingSecret: librenms-redis-secret
+    existingSecretPasswordKey: redis-password
 
 # Ingress 配置
 ingress:

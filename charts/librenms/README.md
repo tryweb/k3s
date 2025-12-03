@@ -10,30 +10,190 @@ charts/librenms/
 ├── fleet.yaml             # Rancher Fleet 配置
 ├── values.yaml            # 基礎 Helm values
 ├── values-production.yaml # 生產環境覆蓋配置
-└── values-staging.yaml    # 測試環境覆蓋配置
+├── values-staging.yaml    # 測試環境覆蓋配置
+└── templates/
+    └── secrets.yaml       # Secret 範例模板（參考用）
 ```
 
 ## 快速開始
 
-### 1. 生成應用程式密鑰
+### 步驟 1：建立命名空間
 
 ```bash
-echo "base64:$(head -c 32 /dev/urandom | base64)"
+kubectl create namespace librenms
 ```
 
-將生成的密鑰填入 `values.yaml` 的 `librenms.appkey` 欄位。
+### 步驟 2：建立 Kubernetes Secrets
 
-### 2. 修改敏感資訊
+⚠️ **重要**：所有敏感資訊必須使用 Kubernetes Secret 管理，不可存放在 Git 中。
 
-編輯 `values.yaml`，修改以下欄位：
-- `appKey`: 應用程式密鑰
-- `mariadb.auth.rootPassword`: MariaDB root 密碼
-- `mariadb.auth.password`: LibreNMS 資料庫密碼
-- `redis.auth.password`: Redis 密碼
+#### 2.1 生成應用程式密鑰
 
-### 3. 配置 Ingress
+```bash
+# 生成 LibreNMS 應用程式密鑰
+APP_KEY=$(echo "base64:$(head -c 32 /dev/urandom | base64)")
+echo "Generated App Key: $APP_KEY"
+```
+
+#### 2.2 建立 LibreNMS App Secret
+
+```bash
+kubectl create secret generic librenms-app-secret \
+  --namespace librenms \
+  --from-literal=appkey="$APP_KEY"
+```
+
+#### 2.3 建立 MariaDB Secret
+
+```bash
+# 生成隨機密碼（或使用您自己的密碼）
+MARIADB_ROOT_PASSWORD=$(openssl rand -base64 24)
+MARIADB_PASSWORD=$(openssl rand -base64 24)
+
+kubectl create secret generic librenms-mariadb-secret \
+  --namespace librenms \
+  --from-literal=mariadb-root-password="$MARIADB_ROOT_PASSWORD" \
+  --from-literal=mariadb-password="$MARIADB_PASSWORD"
+
+# 記錄密碼（請安全保存）
+echo "MariaDB Root Password: $MARIADB_ROOT_PASSWORD"
+echo "MariaDB User Password: $MARIADB_PASSWORD"
+```
+
+#### 2.4 建立 Redis Secret
+
+```bash
+# 生成隨機密碼（或使用您自己的密碼）
+REDIS_PASSWORD=$(openssl rand -base64 24)
+
+kubectl create secret generic librenms-redis-secret \
+  --namespace librenms \
+  --from-literal=redis-password="$REDIS_PASSWORD"
+
+# 記錄密碼（請安全保存）
+echo "Redis Password: $REDIS_PASSWORD"
+```
+
+### 步驟 3：驗證 Secrets 已建立
+
+```bash
+kubectl get secrets -n librenms
+```
+
+預期輸出：
+```
+NAME                       TYPE     DATA   AGE
+librenms-app-secret        Opaque   1      1m
+librenms-mariadb-secret    Opaque   2      1m
+librenms-redis-secret      Opaque   1      1m
+```
+
+### 步驟 4：配置 Ingress
 
 根據您的環境修改 `values.yaml` 或環境特定檔案中的 Ingress 配置。
+
+### 步驟 5：透過 Rancher Fleet 部署
+
+詳見下方「透過 Rancher Fleet 部署」章節。
+
+---
+
+## 敏感資訊管理
+
+### 使用的 Secrets 清單
+
+| Secret 名稱 | 用途 | 必要欄位 |
+|------------|------|---------|
+| `librenms-app-secret` | LibreNMS 應用程式密鑰 | `appkey` |
+| `librenms-mariadb-secret` | MariaDB 資料庫密碼 | `mariadb-root-password`, `mariadb-password` |
+| `librenms-redis-secret` | Redis 密碼 | `redis-password` |
+
+### 一鍵建立所有 Secrets（快速設定）
+
+```bash
+#!/bin/bash
+# 快速建立所有 LibreNMS Secrets 腳本
+
+NAMESPACE="librenms"
+
+# 建立命名空間
+kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+
+# 生成密碼
+APP_KEY="base64:$(head -c 32 /dev/urandom | base64)"
+MARIADB_ROOT_PASSWORD=$(openssl rand -base64 24)
+MARIADB_PASSWORD=$(openssl rand -base64 24)
+REDIS_PASSWORD=$(openssl rand -base64 24)
+
+# 建立 Secrets
+kubectl create secret generic librenms-app-secret \
+  --namespace $NAMESPACE \
+  --from-literal=appkey="$APP_KEY" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl create secret generic librenms-mariadb-secret \
+  --namespace $NAMESPACE \
+  --from-literal=mariadb-root-password="$MARIADB_ROOT_PASSWORD" \
+  --from-literal=mariadb-password="$MARIADB_PASSWORD" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl create secret generic librenms-redis-secret \
+  --namespace $NAMESPACE \
+  --from-literal=redis-password="$REDIS_PASSWORD" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# 輸出密碼（請安全保存）
+echo "========================================"
+echo "Secrets created successfully!"
+echo "========================================"
+echo "App Key: $APP_KEY"
+echo "MariaDB Root Password: $MARIADB_ROOT_PASSWORD"
+echo "MariaDB User Password: $MARIADB_PASSWORD"
+echo "Redis Password: $REDIS_PASSWORD"
+echo "========================================"
+echo "⚠️  請將以上密碼安全保存！"
+```
+
+### 使用 Sealed Secrets（進階）
+
+如果您想將 Secrets 也納入 GitOps 管理，可以使用 Sealed Secrets：
+
+```bash
+# 1. 安裝 kubeseal CLI
+# macOS
+brew install kubeseal
+
+# Linux
+wget https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.24.0/kubeseal-0.24.0-linux-amd64.tar.gz
+tar -xvzf kubeseal-0.24.0-linux-amd64.tar.gz
+sudo mv kubeseal /usr/local/bin/
+
+# 2. 建立並加密 Secret
+kubectl create secret generic librenms-app-secret \
+  --namespace librenms \
+  --from-literal=appkey="base64:YOUR_APP_KEY" \
+  --dry-run=client -o yaml | \
+  kubeseal --format yaml > charts/librenms/templates/librenms-app-sealed-secret.yaml
+
+# 3. 提交加密後的 Secret 到 Git
+git add charts/librenms/templates/librenms-app-sealed-secret.yaml
+git commit -m "Add sealed secret for LibreNMS app key"
+```
+
+### 更新 Secrets
+
+```bash
+# 更新特定 Secret 的值
+kubectl create secret generic librenms-redis-secret \
+  --namespace librenms \
+  --from-literal=redis-password="NEW_PASSWORD" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# 重啟相關 Pod 以載入新密碼
+kubectl rollout restart deployment -n librenms
+```
+
+---
 
 ## 透過 Rancher Fleet 部署
 
@@ -71,6 +231,8 @@ spec:
           env: production
 EOF
 ```
+
+---
 
 ## 版本管理策略
 
@@ -136,6 +298,8 @@ kubectl -n fleet-default patch gitrepo k3s-apps \
 helm rollback librenms <revision-number> -n librenms
 ```
 
+---
+
 ## 單一 Repo 管理多個 App
 
 ### 推薦的目錄結構
@@ -193,37 +357,7 @@ k3s/
    - 核心基礎設施 App（監控、日誌、網路）放一個 Repo
    - 業務應用按團隊或產品線分離
 
-## 敏感資訊管理
-
-### 使用 Kubernetes Secrets
-
-建議將敏感資訊存放在 Kubernetes Secrets，而非 Git：
-
-```yaml
-# values.yaml
-mariadb:
-  auth:
-    existingSecret: librenms-db-secret
-    existingSecretPasswordKey: password
-
-redis:
-  auth:
-    existingSecret: librenms-redis-secret
-    existingSecretPasswordKey: password
-```
-
-### 使用 Sealed Secrets
-
-```bash
-# 安裝 kubeseal
-brew install kubeseal
-
-# 加密 Secret
-kubectl create secret generic librenms-db-secret \
-  --from-literal=password=your-password \
-  --dry-run=client -o yaml | \
-  kubeseal --format yaml > librenms-sealed-secret.yaml
-```
+---
 
 ## 監控部署狀態
 
@@ -246,22 +380,33 @@ helm list -n librenms
 helm history librenms -n librenms
 ```
 
+---
+
 ## 故障排除
 
 ### 常見問題
 
-1. **同步失敗**
+1. **Secret 未找到**
+   ```bash
+   # 確認 Secret 已建立
+   kubectl get secrets -n librenms
+   
+   # 檢查 Secret 內容（base64 編碼）
+   kubectl get secret librenms-app-secret -n librenms -o yaml
+   ```
+
+2. **同步失敗**
    ```bash
    kubectl logs -n cattle-fleet-system -l app=fleet-controller
    ```
 
-2. **Helm 安裝失敗**
+3. **Helm 安裝失敗**
    ```bash
    kubectl get pods -n librenms
    kubectl describe pod <pod-name> -n librenms
    ```
 
-3. **Values 合併問題**
+4. **Values 合併問題**
    ```bash
    # 測試 values 合併結果
    helm template librenms librenms/librenms \
@@ -269,8 +414,22 @@ helm history librenms -n librenms
      -f values-production.yaml
    ```
 
+5. **密碼錯誤**
+   ```bash
+   # 查看 Pod 日誌
+   kubectl logs -n librenms -l app.kubernetes.io/name=librenms
+   
+   # 重新建立 Secret
+   kubectl delete secret librenms-mariadb-secret -n librenms
+   kubectl create secret generic librenms-mariadb-secret ...
+   ```
+
+---
+
 ## 參考資源
 
 - [LibreNMS Helm Chart](https://github.com/librenms/helm-charts)
 - [Rancher Fleet 文件](https://fleet.rancher.io/)
 - [Helm 最佳實踐](https://helm.sh/docs/chart_best_practices/)
+- [Kubernetes Secrets 文件](https://kubernetes.io/docs/concepts/configuration/secret/)
+- [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets)
