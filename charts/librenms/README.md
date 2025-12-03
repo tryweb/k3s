@@ -234,6 +234,103 @@ EOF
 
 ---
 
+## Values 檔案使用邏輯
+
+### 檔案說明
+
+| 檔案 | 用途 | 使用時機 |
+|-----|------|---------|
+| `values.yaml` | 基礎配置 | 所有叢集預設使用 |
+| `values-production.yaml` | 生產環境覆蓋配置 | 叢集標籤 `env: production` |
+| `values-staging.yaml` | 測試環境覆蓋配置 | 叢集標籤 `env: staging` |
+
+### 運作方式
+
+根據 `fleet.yaml` 的配置，Fleet 會根據叢集標籤決定使用哪些 values 檔案：
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        fleet.yaml 配置                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  targets:                    ─── 預設部署目標                   │
+│    - name: default                                              │
+│      clusterSelector: {}     ─── 匹配所有叢集                   │
+│                                                                 │
+│  helm:                                                          │
+│    valuesFiles:                                                 │
+│      - values.yaml           ─── 所有叢集使用此檔案             │
+│                                                                 │
+│  targetCustomizations:       ─── 特定叢集覆蓋配置               │
+│    - name: production                                           │
+│      clusterSelector:                                           │
+│        matchLabels:                                             │
+│          env: production     ─── 符合此標籤的叢集               │
+│      helm:                                                      │
+│        valuesFiles:                                             │
+│          - values.yaml       ─── 載入基礎配置                   │
+│          - values-production.yaml  ─── 再載入生產覆蓋配置       │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 實際使用情境
+
+| 叢集標籤 | 載入的 Values 檔案 | 說明 |
+|---------|-------------------|------|
+| 無特定標籤 | `values.yaml` | 使用基礎配置 |
+| `env: production` | `values.yaml` → `values-production.yaml` | 生產環境（更多資源、TLS 等） |
+| `env: staging` | `values.yaml` → `values-staging.yaml` | 測試環境（較少資源） |
+
+> **注意**：`targetCustomizations` 的 `valuesFiles` 會**完全取代** `helm.valuesFiles`，所以必須包含 `values.yaml`。
+
+### 設定叢集標籤
+
+#### 方式一：Rancher UI
+
+1. 進入 `Cluster Management`
+2. 找到目標叢集，點擊右側的 `⋮` → `Edit Config`
+3. 在 `Labels` 區塊添加：
+   - **Key**: `env`
+   - **Value**: `production` 或 `staging`
+4. 點擊 `Save`
+
+#### 方式二：命令列
+
+```bash
+# 為叢集添加 production 標籤
+kubectl label cluster <cluster-name> env=production -n fleet-default --overwrite
+
+# 為叢集添加 staging 標籤
+kubectl label cluster <cluster-name> env=staging -n fleet-default --overwrite
+
+# 查看叢集標籤
+kubectl get clusters -n fleet-default --show-labels
+```
+
+### 自訂環境配置
+
+如需新增其他環境（如 `development`），請：
+
+1. 建立 `values-development.yaml`
+2. 在 `fleet.yaml` 的 `targetCustomizations` 添加：
+
+```yaml
+targetCustomizations:
+  # ... 其他環境 ...
+  
+  - name: development
+    clusterSelector:
+      matchLabels:
+        env: development
+    helm:
+      valuesFiles:
+        - values.yaml
+        - values-development.yaml
+```
+
+---
+
 ## 版本管理策略
 
 ### 官方 Helm Chart 更新處理
