@@ -1,0 +1,86 @@
+# LibreNMS Helm Chart Values
+# 此檔案由 Git 管理，透過 Rancher Fleet 自動部署
+
+# 基本配置
+image:
+  repository: librenms/librenms
+  tag: ""  # 留空使用 chart 預設版本
+  pullPolicy: IfNotPresent
+
+# 應用程式密鑰 (請在部署前生成新的密鑰)
+# 使用命令: echo "base64:$(head -c 32 /dev/urandom | base64)"
+appKey: "base64:CHANGE_ME_GENERATE_NEW_KEY"
+
+# 資源配置
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "100m"
+  limits:
+    memory: "1Gi"
+    cpu: "500m"
+
+# 持久化存儲
+persistence:
+  enabled: true
+  storageClass: ""  # 使用預設 StorageClass
+  size: 5Gi
+
+# 資料庫配置 (內建 MariaDB)
+mariadb:
+  enabled: true
+  auth:
+    rootPassword: "CHANGE_ME"
+    database: librenms
+    username: librenms
+    password: "CHANGE_ME"
+  primary:
+    persistence:
+      enabled: true
+      size: 10Gi
+
+# Redis 配置
+redis:
+  enabled: true
+  auth:
+    enabled: true
+    password: "CHANGE_ME"
+
+# Ingress 配置
+ingress:
+  enabled: true
+  className: "traefik"  # k3s 預設使用 traefik
+  annotations: {}
+  hosts:
+    - host: librenms.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# 服務配置
+service:
+  type: ClusterIP
+  port: 80
+
+# SNMP 配置
+snmp:
+  community: "public"
+
+# 環境變數
+env: {}
+
+# 額外的環境變數從 Secret 載入
+envFrom: []
+
+# 副本數
+replicaCount: 1
+
+# 節點選擇器
+nodeSelector: {}
+
+# 容忍度
+tolerations: []
+
+# 親和性
+affinity: {}

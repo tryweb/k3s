@@ -1,0 +1,54 @@
+# Fleet GitOps 配置檔案
+# 用於 Rancher Fleet 自動部署 LibreNMS
+
+# 預設命名空間
+defaultNamespace: librenms
+
+# Helm 配置
+helm:
+  # 使用官方 LibreNMS Helm Chart
+  repo: https://www.librenms.org/helm-charts
+  chart: librenms
+  # 指定版本 - 重要：需要定期檢查並更新此版本號
+  # 查看最新版本: helm search repo librenms/librenms --versions
+  version: ""  # 留空使用最新版本，或指定如 "1.0.0"
+  
+  # 值檔案路徑（相對於此 fleet.yaml）
+  valuesFiles:
+    - values.yaml
+  
+  # 強制升級（解決某些 CRD 問題）
+  force: false
+  
+  # 等待所有 Pod 就緒
+  waitForJobs: true
+
+# 目標叢集標籤選擇器
+# 可以指定部署到哪些叢集
+targetCustomizations:
+  - name: production
+    clusterSelector:
+      matchLabels:
+        env: production
+    helm:
+      valuesFiles:
+        - values.yaml
+        - values-production.yaml
+  
+  - name: staging
+    clusterSelector:
+      matchLabels:
+        env: staging
+    helm:
+      valuesFiles:
+        - values.yaml
+        - values-staging.yaml
+
+# 差異配置
+diff:
+  comparePatches:
+    - apiVersion: v1
+      kind: Secret
+      operations:
+        - op: remove
+          path: /data

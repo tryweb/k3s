@@ -1,0 +1,103 @@
+# Helm Chart 配置檢查 CI Workflow
+name: Helm Chart Check
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'charts/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'charts/**'
+
+jobs:
+  lint:
+    name: Helm Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'latest'
+
+      - name: Add Helm repositories
+        run: |
+          helm repo add librenms https://www.librenms.org/helm-charts
+          helm repo update
+
+      - name: Lint LibreNMS values
+        run: |
+          helm lint librenms/librenms \
+            -f charts/librenms/values.yaml
+
+      - name: Template test - staging
+        run: |
+          helm template librenms librenms/librenms \
+            -f charts/librenms/values.yaml \
+            -f charts/librenms/values-staging.yaml \
+            --dry-run > /dev/null
+
+      - name: Template test - production
+        run: |
+          helm template librenms librenms/librenms \
+            -f charts/librenms/values.yaml \
+            -f charts/librenms/values-production.yaml \
+            --dry-run > /dev/null
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+
+      - name: Add Helm repositories
+        run: |
+          helm repo add librenms https://www.librenms.org/helm-charts
+          helm repo update
+
+      - name: Generate manifests
+        run: |
+          mkdir -p /tmp/manifests
+          helm template librenms librenms/librenms \
+            -f charts/librenms/values.yaml \
+            > /tmp/manifests/librenms.yaml
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: '/tmp/manifests'
+          format: 'table'
+          exit-code: '0'  # 不阻止 CI，僅報告
+
+  version-check:
+    name: Check for Chart Updates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+
+      - name: Add Helm repositories
+        run: |
+          helm repo add librenms https://www.librenms.org/helm-charts
+          helm repo update
+
+      - name: Check LibreNMS chart versions
+        run: |
+          echo "Available LibreNMS chart versions:"
+          helm search repo librenms/librenms --versions | head -10
+          
+          echo ""
+          echo "Currently configured version in fleet.yaml:"
+          grep -A2 "chart: librenms" charts/librenms/fleet.yaml || echo "Using latest version"
