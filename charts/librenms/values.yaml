@@ -26,17 +26,6 @@ librenms:
       # limits:
       #   memory: "1Gi"
       #   cpu: "500m"
-  
-  # Poller 配置
-  pollers:
-    resources: {}
-  
-  # Syslog 配置
-  syslog:
-    resources: {}
-
-# 注意：image 配置在 librenms 區塊內
-# 官方 chart 使用 librenms.image
 
 # 持久化存儲
 persistence:
