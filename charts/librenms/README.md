@@ -12,7 +12,8 @@ charts/librenms/
 ├── values-production.yaml # 生產環境覆蓋配置
 ├── values-staging.yaml    # 測試環境覆蓋配置
 ├── scripts/
-│   └── create-secrets.sh  # Secret 自動建立腳本
+│   ├── create-secrets.sh  # Secret 自動建立腳本
+│   └── copy-tls-secret.sh # TLS 憑證複製腳本
 └── templates/
     └── secrets.yaml       # Secret 範例模板（參考用）
 ```
@@ -262,17 +263,32 @@ kubectl get pods -A | grep -E "(ingress|traefik)"
 
 如果需要啟用 HTTPS，必須先建立 TLS Secret。
 
-**方式一：使用現有的 Wildcard 憑證**
+**方式一：使用現有的 Wildcard 憑證（推薦）**
 
-如果您有 wildcard 憑證（例如 `*.k3s.ichiayi.com`），可以將憑證複製到 librenms 命名空間：
+如果您有 wildcard 憑證（例如 `*.k3s.ichiayi.com`）已存在於其他 namespace，
+可以使用腳本複製到 librenms namespace：
 
 ```bash
-# 假設憑證已存在於 default 命名空間
+cd charts/librenms/scripts
+
+# 使用預設值（從 default 複製 wildcard-k3s-ichiayi-com-tls 到 librenms）
+./copy-tls-secret.sh
+
+# 或指定參數
+SECRET_NAME=my-tls-secret SOURCE_NS=cert-manager TARGET_NS=librenms ./copy-tls-secret.sh
+```
+
+> **注意**：Kubernetes Secret 是 namespace-scoped，Ingress 只能引用同一 namespace 內的 Secret。
+
+**手動複製方式：**
+
+```bash
+# 從 default namespace 複製
 kubectl get secret wildcard-k3s-ichiayi-com-tls -n default -o yaml | \
   sed 's/namespace: default/namespace: librenms/' | \
   kubectl apply -f -
 
-# 或直接建立
+# 或直接建立新憑證
 kubectl create secret tls wildcard-k3s-ichiayi-com-tls \
   --namespace librenms \
   --cert=/path/to/tls.crt \
