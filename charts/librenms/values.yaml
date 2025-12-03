@@ -9,8 +9,8 @@
 librenms:
   # 應用程式密鑰 - 使用 existingSecret 引用
   # 需要先建立 Secret: librenms-app-secret
+  # Secret 中必須包含 key 名為 "appkey" 的資料
   existingSecret: librenms-app-secret
-  existingSecretKey: appkey
 
 # 基本配置
 image:
