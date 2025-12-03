@@ -7,8 +7,10 @@
 
 # LibreNMS 核心配置
 librenms:
-  # 應用程式密鑰 - 使用 existingSecret 引用
-  # 需要先建立 Secret: librenms-app-secret
+  # 應用程式密鑰
+  # 注意：此值會被 existingSecret 覆蓋，但 chart schema 要求必須提供字串值
+  appkey: "placeholder-will-be-overridden-by-secret"
+  # 實際密鑰從 Secret 載入（需要先建立 Secret: librenms-app-secret）
   # Secret 中必須包含 key 名為 "appkey" 的資料
   existingSecret: librenms-app-secret
 
