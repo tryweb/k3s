@@ -402,9 +402,12 @@ ingress:
 | `librenms-mysql-secret` | MySQL 資料庫密碼（Bitnami chart） | `mysql-root-password`, `mysql-password` |
 | `<release-name>-mysql` | MySQL 資料庫密碼（LibreNMS poller） | `mysql-root-password`, `mysql-password` |
 | `librenms-redis-secret` | Redis 密碼 | `redis-password` |
+| `librenms-helm-values` | Fleet 升級時傳遞 MySQL 密碼 | `values.yaml`（YAML 格式） |
 
-> **⚠️ 重要**：LibreNMS 官方 Helm chart 的 poller 組件硬編碼使用 `{{ .Release.Name }}-mysql` 作為 Secret 名稱，
-> 因此必須額外建立一個符合此命名規則的 Secret。使用 `scripts/create-secrets.sh` 腳本可自動處理此問題。
+> **⚠️ 重要說明**：
+> - LibreNMS 官方 Helm chart 的 poller 組件硬編碼使用 `{{ .Release.Name }}-mysql` 作為 Secret 名稱
+> - Bitnami MySQL chart 升級時需要密碼驗證，`librenms-helm-values` Secret 用於解決此問題
+> - 使用 `scripts/create-secrets.sh` 腳本可自動建立所有必要的 Secrets
 
 ### 一鍵建立所有 Secrets（快速設定）
 

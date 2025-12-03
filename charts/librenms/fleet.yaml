@@ -22,6 +22,15 @@ helm:
   valuesFiles:
     - values.yaml
 
+  # 從 Secret 讀取 MySQL 密碼（解決 Bitnami chart 升級時的密碼驗證問題）
+  # Secret 中的 values.yaml key 包含 YAML 格式的 mysql.auth.rootPassword 和 mysql.auth.password
+  # 參考：https://fleet.rancher.io/ref-fleet-yaml
+  valuesFrom:
+    - secretKeyRef:
+        name: librenms-helm-values
+        namespace: librenms
+        key: values.yaml
+
   # 強制升級（解決某些 CRD 問題）
   force: false
 

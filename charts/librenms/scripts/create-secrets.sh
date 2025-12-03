@@ -98,6 +98,24 @@ kubectl create secret generic librenms-redis-secret \
   --from-literal=redis-password="$REDIS_PASSWORD" \
   --dry-run=client -o yaml | kubectl apply -f -
 echo -e "${GREEN}✓ librenms-redis-secret 已建立${NC}"
+
+# 建立 Fleet Helm Values Secret
+# 解決 Bitnami MySQL chart 升級時的密碼驗證問題
+# Fleet 會從此 Secret 的 values.yaml key 讀取 YAML 格式的值
+# 參考：https://fleet.rancher.io/ref-fleet-yaml
+echo "正在建立 librenms-helm-values (供 Fleet 升級時使用)..."
+HELM_VALUES_YAML=$(cat <<EOF
+mysql:
+  auth:
+    rootPassword: "${MYSQL_ROOT_PASSWORD}"
+    password: "${MYSQL_PASSWORD}"
+EOF
+)
+kubectl create secret generic librenms-helm-values \
+  --namespace "$NAMESPACE" \
+  --from-literal=values.yaml="$HELM_VALUES_YAML" \
+  --dry-run=client -o yaml | kubectl apply -f -
+echo -e "${GREEN}✓ librenms-helm-values 已建立${NC}"
 echo ""
 
 # 驗證
@@ -124,6 +142,7 @@ echo "  - librenms-app-secret (App Key)"
 echo "  - librenms-mysql-secret (MySQL - Bitnami chart 用)"
 echo "  - ${POLLER_MYSQL_SECRET} (MySQL - LibreNMS poller 用)"
 echo "  - librenms-redis-secret (Redis)"
+echo "  - librenms-helm-values (Fleet 升級時傳遞 MySQL 密碼)"
 echo ""
 echo "下一步："
 echo "1. 將密碼安全保存到密碼管理器"

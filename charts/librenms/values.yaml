@@ -53,7 +53,8 @@ persistence:
   size: 5Gi
 
 # 資料庫配置 (內建 MySQL - Bitnami chart)
-# ⚠️ 重要：必須使用 existingSecret 避免升級時密碼問題
+# ⚠️ 重要：Bitnami chart 升級時的密碼驗證問題
+# 參考：https://github.com/bitnami/charts/issues/17477
 mysql:
   enabled: true
   auth:
@@ -62,6 +63,8 @@ mysql:
     # 使用預建立的 Secret（必須在部署前建立）
     # Secret 必須包含 key: mysql-root-password, mysql-password
     existingSecret: librenms-mysql-secret
+  # 跳過初始化腳本（避免升級時重新初始化）
+  initdbScriptsConfigMap: ""
   primary:
     persistence:
       enabled: true
