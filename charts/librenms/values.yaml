@@ -13,21 +13,30 @@ librenms:
   # 實際密鑰從 Secret 載入（需要先建立 Secret: librenms-app-secret）
   # Secret 中必須包含 key 名為 "appkey" 的資料
   existingSecret: librenms-app-secret
+  
+  # Frontend 配置
+  frontend:
+    replicas: 1
+    # 資源配置 - 先不設限制，讓 Pod 能啟動
+    # 待運行穩定後，根據 kubectl top pods 實際使用量調整
+    resources: {}
+      # requests:
+      #   memory: "256Mi"
+      #   cpu: "100m"
+      # limits:
+      #   memory: "1Gi"
+      #   cpu: "500m"
+  
+  # Poller 配置
+  pollers:
+    resources: {}
+  
+  # Syslog 配置
+  syslog:
+    resources: {}
 
-# 基本配置
-image:
-  repository: librenms/librenms
-  tag: ""  # 留空使用 chart 預設版本
-  pullPolicy: IfNotPresent
-
-# 資源配置
-resources:
-  requests:
-    memory: "256Mi"
-    cpu: "100m"
-  limits:
-    memory: "1Gi"
-    cpu: "500m"
+# 注意：image 配置在 librenms 區塊內
+# 官方 chart 使用 librenms.image
 
 # 持久化存儲
 persistence:
