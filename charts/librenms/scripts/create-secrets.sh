@@ -42,8 +42,8 @@ echo ""
 # 生成密碼
 echo "正在生成密碼..."
 APP_KEY="base64:$(head -c 32 /dev/urandom | base64)"
-MARIADB_ROOT_PASSWORD=$(openssl rand -base64 24)
-MARIADB_PASSWORD=$(openssl rand -base64 24)
+MYSQL_ROOT_PASSWORD=$(openssl rand -base64 24)
+MYSQL_PASSWORD=$(openssl rand -base64 24)
 REDIS_PASSWORD=$(openssl rand -base64 24)
 echo -e "${GREEN}✓ 密碼已生成${NC}"
 echo ""
@@ -56,14 +56,14 @@ kubectl create secret generic librenms-app-secret \
   --dry-run=client -o yaml | kubectl apply -f -
 echo -e "${GREEN}✓ librenms-app-secret 已建立${NC}"
 
-# 建立 MariaDB Secret
-echo "正在建立 librenms-mariadb-secret..."
-kubectl create secret generic librenms-mariadb-secret \
+# 建立 MySQL Secret (Bitnami MySQL chart 格式)
+echo "正在建立 librenms-mysql-secret..."
+kubectl create secret generic librenms-mysql-secret \
   --namespace "$NAMESPACE" \
-  --from-literal=mariadb-root-password="$MARIADB_ROOT_PASSWORD" \
-  --from-literal=mariadb-password="$MARIADB_PASSWORD" \
+  --from-literal=mysql-root-password="$MYSQL_ROOT_PASSWORD" \
+  --from-literal=mysql-password="$MYSQL_PASSWORD" \
   --dry-run=client -o yaml | kubectl apply -f -
-echo -e "${GREEN}✓ librenms-mariadb-secret 已建立${NC}"
+echo -e "${GREEN}✓ librenms-mysql-secret 已建立${NC}"
 
 # 建立 Redis Secret
 echo "正在建立 librenms-redis-secret..."
@@ -87,8 +87,8 @@ echo ""
 echo -e "${YELLOW}⚠️  請將以下密碼安全保存！${NC}"
 echo ""
 echo "App Key: $APP_KEY"
-echo "MariaDB Root Password: $MARIADB_ROOT_PASSWORD"
-echo "MariaDB User Password: $MARIADB_PASSWORD"
+echo "MySQL Root Password: $MYSQL_ROOT_PASSWORD"
+echo "MySQL User Password: $MYSQL_PASSWORD"
 echo "Redis Password: $REDIS_PASSWORD"
 echo ""
 echo -e "${GREEN}========================================${NC}"

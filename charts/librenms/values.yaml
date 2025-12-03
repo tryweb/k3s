@@ -33,15 +33,16 @@ persistence:
   storageClass: "nfs-client"  # 使用 NFS StorageClass
   size: 5Gi
 
-# 資料庫配置 (內建 MariaDB)
+# 資料庫配置 (內建 MySQL - Bitnami chart)
 # 密碼使用 existingSecret 引用，不存放在 Git 中
-mariadb:
+mysql:
   enabled: true
   auth:
     database: librenms
     username: librenms
     # 使用預先建立的 Secret
-    existingSecret: librenms-mariadb-secret
+    # Secret 必須包含 key: mysql-root-password, mysql-password
+    existingSecret: librenms-mysql-secret
   primary:
     persistence:
       enabled: true
