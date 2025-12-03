@@ -23,8 +23,14 @@ helm:
   # 等待所有 Pod 就緒
   waitForJobs: true
 
-# 目標叢集標籤選擇器
-# 可以指定部署到哪些叢集
+# 部署目標 - 必須指定才能部署
+# 使用空的 clusterSelector 匹配所有叢集
+targets:
+  - name: default
+    clusterSelector: {}
+
+# 目標叢集自訂配置（可選）
+# 針對特定標籤的叢集使用不同的 values 檔案
 targetCustomizations:
   - name: production
     clusterSelector:
