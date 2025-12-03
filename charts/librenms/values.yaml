@@ -14,6 +14,14 @@ librenms:
   # Secret 中必須包含 key 名為 "appkey" 的資料
   existingSecret: librenms-app-secret
   
+  # 額外環境變數（從 Secret 載入 Redis 密碼）
+  extraEnvs:
+    - name: REDIS_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: librenms-redis-secret
+          key: redis-password
+  
   # Frontend 配置
   frontend:
     replicas: 1
@@ -61,7 +69,7 @@ rrdcached:
       size: 1Gi
 
 # Redis 配置
-# 密碼使用 existingSecret 引用，不存放在 Git 中
+# 啟用認證，密碼從 existingSecret 載入
 redis:
   enabled: true
   auth:

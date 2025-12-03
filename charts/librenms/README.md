@@ -759,6 +759,185 @@ helm history librenms -n librenms
    kubectl create secret generic librenms-mariadb-secret ...
    ```
 
+### Bitnami MySQL 密碼循環問題
+
+#### 問題描述
+
+當遇到以下錯誤時：
+
+```
+PASSWORDS ERROR: You must provide your current passwords when upgrading the release.
+'auth.rootPassword' must not be empty
+```
+
+這是因為 Bitnami MySQL chart 的升級機制：
+- 首次安裝時自動生成密碼存入 Secret
+- 升級時檢查現有 Secret 取得密碼
+- 如果 Secret 不存在或名稱不匹配 → 要求手動提供密碼
+
+#### 解決方案：完全清理後重新安裝
+
+當處於「有 Helm release 記錄但無正確 Secret」的狀態時，最乾淨的解決方式是刪除所有相關資源後重新安裝。
+
+**⚠️ 警告**：此操作會刪除所有 LibreNMS 資料，僅適用於新安裝或可接受資料遺失的情況。
+
+```bash
+#!/bin/bash
+# LibreNMS 完全重新安裝腳本
+
+set -e
+
+echo "=========================================="
+echo "LibreNMS 完全重新安裝"
+echo "⚠️  此操作會刪除所有 LibreNMS 資料！"
+echo "=========================================="
+read -p "確定要繼續嗎？(y/N) " confirm
+if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+    echo "操作已取消"
+    exit 0
+fi
+
+# 步驟 1：刪除 Fleet GitRepo（這會同時刪除 Helm release）
+echo ""
+echo "步驟 1：刪除 Fleet GitRepo..."
+kubectl delete gitrepo k3s-librenms-app -n fleet-local --ignore-not-found=true
+
+# 等待 GitRepo 刪除完成
+echo "等待 GitRepo 刪除完成..."
+sleep 10
+
+# 步驟 2：刪除 librenms namespace（清理所有殘留資源）
+echo ""
+echo "步驟 2：刪除 librenms namespace..."
+kubectl delete namespace librenms --ignore-not-found=true
+
+# 等待 namespace 刪除完成
+echo "等待 namespace 刪除完成..."
+while kubectl get namespace librenms &> /dev/null; do
+    echo "  仍在刪除中..."
+    sleep 5
+done
+echo "Namespace 已刪除"
+
+# 步驟 3：重新建立 namespace 和必要 Secrets
+echo ""
+echo "步驟 3：建立 namespace 和 Secrets..."
+kubectl create namespace librenms
+
+# 生成密碼
+APP_KEY="base64:$(head -c 32 /dev/urandom | base64)"
+REDIS_PASSWORD=$(openssl rand -base64 24)
+
+# App Secret
+kubectl create secret generic librenms-app-secret \
+  --namespace librenms \
+  --from-literal=appkey="$APP_KEY"
+
+# Redis Secret
+kubectl create secret generic librenms-redis-secret \
+  --namespace librenms \
+  --from-literal=redis-password="$REDIS_PASSWORD"
+
+echo ""
+echo "Secrets 已建立："
+kubectl get secrets -n librenms
+
+# 步驟 4：重新建立 Fleet GitRepo
+echo ""
+echo "步驟 4：重新建立 Fleet GitRepo..."
+kubectl apply -f - <<EOF
+apiVersion: fleet.cattle.io/v1alpha1
+kind: GitRepo
+metadata:
+  name: k3s-librenms-app
+  namespace: fleet-local
+spec:
+  repo: https://github.com/tryweb/k3s.git
+  branch: main
+  paths:
+    - charts/librenms
+  targets:
+    - clusterSelector: {}
+EOF
+
+echo ""
+echo "=========================================="
+echo "重新安裝完成！"
+echo "=========================================="
+echo ""
+echo "請保存以下密碼："
+echo "App Key: $APP_KEY"
+echo "Redis Password: $REDIS_PASSWORD"
+echo ""
+echo "MySQL 密碼會由 Bitnami chart 自動生成，可使用以下指令查看："
+echo "kubectl get secret -n librenms -l app.kubernetes.io/name=mysql -o jsonpath='{.items[0].data.mysql-root-password}' | base64 -d"
+echo ""
+echo "監控部署狀態："
+echo "kubectl get pods -n librenms -w"
+```
+
+#### 手動執行步驟
+
+如果不想使用腳本，可以手動執行以下步驟：
+
+```bash
+# 1. 刪除 Fleet GitRepo
+kubectl delete gitrepo k3s-librenms-app -n fleet-local
+
+# 2. 刪除 librenms namespace
+kubectl delete namespace librenms
+
+# 3. 等待刪除完成
+kubectl get namespace librenms  # 應該顯示 Not Found
+
+# 4. 重新建立 namespace
+kubectl create namespace librenms
+
+# 5. 建立 App Secret
+APP_KEY="base64:$(head -c 32 /dev/urandom | base64)"
+kubectl create secret generic librenms-app-secret \
+  --namespace librenms \
+  --from-literal=appkey="$APP_KEY"
+
+# 6. 建立 Redis Secret
+REDIS_PASSWORD=$(openssl rand -base64 24)
+kubectl create secret generic librenms-redis-secret \
+  --namespace librenms \
+  --from-literal=redis-password="$REDIS_PASSWORD"
+
+# 7. 重新建立 Fleet GitRepo（透過 Rancher UI 或 kubectl）
+kubectl apply -f - <<EOF
+apiVersion: fleet.cattle.io/v1alpha1
+kind: GitRepo
+metadata:
+  name: k3s-librenms-app
+  namespace: fleet-local
+spec:
+  repo: https://github.com/tryweb/k3s.git
+  branch: main
+  paths:
+    - charts/librenms
+  targets:
+    - clusterSelector: {}
+EOF
+
+# 8. 監控部署狀態
+kubectl get pods -n librenms -w
+```
+
+#### 為什麼這樣可以解決問題
+
+1. **刪除 GitRepo** → Helm release 被清除，Fleet 不再追蹤此部署
+2. **刪除 namespace** → 所有 PVC/Secret/Pod 被清除，確保無殘留狀態
+3. **重新建立 GitRepo** → 觸發「首次安裝」邏輯
+4. **MySQL 自動生成密碼** → 因為 values.yaml 沒有設定 `mysql.auth.existingSecret`
+
+#### 預防此問題
+
+- **首次安裝前**：確保必要的 Secrets 已建立
+- **升級時**：不要隨意變更 `existingSecret` 設定
+- **備份密碼**：記錄自動生成的密碼以便日後升級使用
+
 ---
 
 ## 參考資源
