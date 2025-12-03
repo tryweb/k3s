@@ -43,21 +43,21 @@ kubectl create secret generic librenms-app-secret \
   --from-literal=appkey="$APP_KEY"
 ```
 
-#### 2.3 建立 MariaDB Secret
+#### 2.3 建立 MySQL Secret
 
 ```bash
 # 生成隨機密碼（或使用您自己的密碼）
-MARIADB_ROOT_PASSWORD=$(openssl rand -base64 24)
-MARIADB_PASSWORD=$(openssl rand -base64 24)
+MYSQL_ROOT_PASSWORD=$(openssl rand -base64 24)
+MYSQL_PASSWORD=$(openssl rand -base64 24)
 
-kubectl create secret generic librenms-mariadb-secret \
+kubectl create secret generic librenms-mysql-secret \
   --namespace librenms \
-  --from-literal=mariadb-root-password="$MARIADB_ROOT_PASSWORD" \
-  --from-literal=mariadb-password="$MARIADB_PASSWORD"
+  --from-literal=mysql-root-password="$MYSQL_ROOT_PASSWORD" \
+  --from-literal=mysql-password="$MYSQL_PASSWORD"
 
 # 記錄密碼（請安全保存）
-echo "MariaDB Root Password: $MARIADB_ROOT_PASSWORD"
-echo "MariaDB User Password: $MARIADB_PASSWORD"
+echo "MySQL Root Password: $MYSQL_ROOT_PASSWORD"
+echo "MySQL User Password: $MYSQL_PASSWORD"
 ```
 
 #### 2.4 建立 Redis Secret
@@ -84,7 +84,7 @@ kubectl get secrets -n librenms
 ```
 NAME                       TYPE     DATA   AGE
 librenms-app-secret        Opaque   1      1m
-librenms-mariadb-secret    Opaque   2      1m
+librenms-mysql-secret      Opaque   2      1m
 librenms-redis-secret      Opaque   1      1m
 ```
 
@@ -112,8 +112,8 @@ persistence:
   storageClass: "nfs-client"  # 使用 NFS StorageClass
   size: 5Gi
 
-# 資料庫配置
-mariadb:
+# 資料庫配置 (MySQL)
+mysql:
   primary:
     persistence:
       enabled: true
@@ -343,7 +343,7 @@ ingress:
 | Secret 名稱 | 用途 | 必要欄位 |
 |------------|------|---------|
 | `librenms-app-secret` | LibreNMS 應用程式密鑰 | `appkey` |
-| `librenms-mariadb-secret` | MariaDB 資料庫密碼 | `mariadb-root-password`, `mariadb-password` |
+| `librenms-mysql-secret` | MySQL 資料庫密碼 | `mysql-root-password`, `mysql-password` |
 | `librenms-redis-secret` | Redis 密碼 | `redis-password` |
 
 ### 一鍵建立所有 Secrets（快速設定）
@@ -359,8 +359,8 @@ kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f 
 
 # 生成密碼
 APP_KEY="base64:$(head -c 32 /dev/urandom | base64)"
-MARIADB_ROOT_PASSWORD=$(openssl rand -base64 24)
-MARIADB_PASSWORD=$(openssl rand -base64 24)
+MYSQL_ROOT_PASSWORD=$(openssl rand -base64 24)
+MYSQL_PASSWORD=$(openssl rand -base64 24)
 REDIS_PASSWORD=$(openssl rand -base64 24)
 
 # 建立 Secrets
@@ -369,10 +369,10 @@ kubectl create secret generic librenms-app-secret \
   --from-literal=appkey="$APP_KEY" \
   --dry-run=client -o yaml | kubectl apply -f -
 
-kubectl create secret generic librenms-mariadb-secret \
+kubectl create secret generic librenms-mysql-secret \
   --namespace $NAMESPACE \
-  --from-literal=mariadb-root-password="$MARIADB_ROOT_PASSWORD" \
-  --from-literal=mariadb-password="$MARIADB_PASSWORD" \
+  --from-literal=mysql-root-password="$MYSQL_ROOT_PASSWORD" \
+  --from-literal=mysql-password="$MYSQL_PASSWORD" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 kubectl create secret generic librenms-redis-secret \
@@ -385,8 +385,8 @@ echo "========================================"
 echo "Secrets created successfully!"
 echo "========================================"
 echo "App Key: $APP_KEY"
-echo "MariaDB Root Password: $MARIADB_ROOT_PASSWORD"
-echo "MariaDB User Password: $MARIADB_PASSWORD"
+echo "MySQL Root Password: $MYSQL_ROOT_PASSWORD"
+echo "MySQL User Password: $MYSQL_PASSWORD"
 echo "Redis Password: $REDIS_PASSWORD"
 echo "========================================"
 echo "⚠️  請將以上密碼安全保存！"
@@ -755,8 +755,8 @@ helm history librenms -n librenms
    kubectl logs -n librenms -l app.kubernetes.io/name=librenms
    
    # 重新建立 Secret
-   kubectl delete secret librenms-mariadb-secret -n librenms
-   kubectl create secret generic librenms-mariadb-secret ...
+   kubectl delete secret librenms-mysql-secret -n librenms
+   kubectl create secret generic librenms-mysql-secret ...
    ```
 
 ### Bitnami MySQL 密碼循環問題

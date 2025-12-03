@@ -42,14 +42,15 @@ persistence:
   size: 5Gi
 
 # 資料庫配置 (內建 MySQL - Bitnami chart)
-# 不設定 existingSecret，讓 chart 自動管理密碼
+# ⚠️ 重要：必須使用 existingSecret 避免升級時密碼問題
 mysql:
   enabled: true
   auth:
     database: librenms
     username: librenms
-    # 讓 Bitnami chart 自動生成並管理密碼
-    # 首次安裝會建立 Secret: {release-name}-mysql
+    # 使用預建立的 Secret（必須在部署前建立）
+    # Secret 必須包含 key: mysql-root-password, mysql-password
+    existingSecret: librenms-mysql-secret
   primary:
     persistence:
       enabled: true
