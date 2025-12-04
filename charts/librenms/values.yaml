@@ -40,20 +40,17 @@ librenms:
 
   # SNMP Scanner 配置
   # 用於自動發現網路設備（需要在 LibreNMS Web UI 中啟用 SNMP network discovery）
+  # ⚠️ 已知問題：CronJob 預設以 root 執行會導致 "lnms must not run as root" 錯誤
+  #    官方 chart 目前不支援 securityContext 設定，需等待上游修復
+  #    參考: https://github.com/librenms/helm-charts/issues
   snmp_scanner:
-    enabled: true
+    enabled: false  # 暫時停用，等待官方支援 securityContext
     # Cron 排程（預設每小時第 15 分鐘執行）
     cron: "15 * * * *"
     resources: {}
     nodeSelector: {}
     extraEnvs: []
     extraEnvFrom: []
-    # 安全上下文 - 以 librenms 用戶身分執行（UID 1000）
-    # 解決 "lnms must not run as root" 錯誤
-    securityContext:
-      runAsNonRoot: true
-      runAsUser: 1000
-      runAsGroup: 1000
 
 # 持久化存儲
 persistence:
