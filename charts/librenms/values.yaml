@@ -40,11 +40,8 @@ librenms:
 
   # SNMP Scanner 配置
   # 用於自動發現網路設備（需要在 LibreNMS Web UI 中啟用 SNMP network discovery）
-  # ⚠️ 暫時停用：librenms chart 6.0.0 的 librenms-cron.yml 模板有 nindent bug
-  # 當 extraEnvs 有值時會導致 YAML 縮排錯誤
-  # 追蹤 issue: https://github.com/librenms/helm-charts/issues
   snmp_scanner:
-    enabled: false
+    enabled: true
     # Cron 排程（預設每小時第 15 分鐘執行）
     cron: "15 * * * *"
     resources: {}
