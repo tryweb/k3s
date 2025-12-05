@@ -61,11 +61,21 @@ librenms:
       runAsUser: 1000
       runAsGroup: 1000
 
-# 持久化存儲
-persistence:
-  enabled: true
-  storageClass: "nfs-client"  # 使用 NFS StorageClass
-  size: 5Gi
+  # RRDcached 配置（必須在 librenms 區塊內）
+  # 用於 RRD 資料快取，提升效能
+  rrdcached:
+    image:
+      repository: crazymax/rrdcached
+      tag: "1.8.0"
+    persistence:
+      enabled: true
+      journal:
+        size: 1Gi
+        storageClassName: "nfs-client"
+      rrdcached:
+        size: 5Gi
+        storageClassName: "nfs-client"
+    resources: {}
 
 # 資料庫配置 (內建 MySQL - Bitnami chart)
 # ⚠️ 重要：Bitnami chart 升級時的密碼驗證問題
@@ -85,18 +95,6 @@ mysql:
       enabled: true
       storageClass: "nfs-client"  # 使用 NFS StorageClass
       size: 10Gi
-
-# RRDcached 配置
-# 用於 RRD 資料快取，提升效能
-rrdcached:
-  enabled: true
-  persistence:
-    rrd:
-      storageClass: "nfs-client"  # 使用 NFS StorageClass
-      size: 5Gi
-    journal:
-      storageClass: "nfs-client"  # 使用 NFS StorageClass
-      size: 1Gi
 
 # Redis 配置
 # 啟用認證，密碼從 existingSecret 載入
