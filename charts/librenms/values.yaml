@@ -4,10 +4,18 @@
 #
 # ⚠️  敏感資訊（密碼、密鑰）請使用 Kubernetes Secret 管理
 #     請參閱 README.md 的「敏感資訊管理」章節
+#
+# ⚠️  注意：從 Git repo 直接安裝 chart 時，必須提供所有 template 需要的值
+#     因為不會自動合併 chart 的預設 values.yaml
+
+# 全域設定
+global:
+  security:
+    allowInsecureImages: true
 
 # LibreNMS 核心配置
 librenms:
-  # 映像檔設定（schema 要求必填）
+  # 映像檔設定（必填）
   image:
     repository: librenms/librenms
     tag: "25.11.0"
@@ -16,8 +24,15 @@ librenms:
   # 注意：此值會被 existingSecret 覆蓋，但 chart schema 要求必須提供字串值
   appkey: "placeholder-will-be-overridden-by-secret"
   # 實際密鑰從 Secret 載入（需要先建立 Secret: librenms-app-secret）
-  # Secret 中必須包含 key 名為 "appkey" 的資料
   existingSecret: librenms-app-secret
+
+  # 時區設定
+  timezone: UTC
+
+  # 自訂配置
+  configuration: |
+    $config['distributed_poller_group']          = '0';
+    $config['distributed_poller']                = true;
 
   # 額外環境變數（從 Secret 載入 Redis 密碼）
   extraEnvs:
@@ -27,27 +42,52 @@ librenms:
           name: librenms-redis-secret
           key: redis-password
 
-  # 額外環境變數來源（從 ConfigMap 或 Secret 載入）
+  # 額外環境變數來源
   extraEnvFrom: []
+
+  # 全域特權模式
+  privileged: false
+
+  # Init Container 配置
+  initContainer:
+    image:
+      repository: busybox
+      tag: "1.37"
+    resources: {}
 
   # Frontend 配置
   frontend:
     replicas: 1
-    # 資源配置 - 先不設限制，讓 Pod 能啟動
-    # 待運行穩定後，根據 kubectl top pods 實際使用量調整
+    readinessProbe:
+      httpGet:
+        path: /login
+        port: 8000
+      initialDelaySeconds: 30
+      periodSeconds: 60
+      timeoutSeconds: 10
     resources: {}
-      # requests:
-      #   memory: "256Mi"
-      #   cpu: "100m"
-      # limits:
-      #   memory: "1Gi"
-      #   cpu: "500m"
+    privileged: false
+    nodeSelector: {}
+    extraVolumes: []
+    extraVolumeMounts: []
+    extraEnvs: []
+    extraEnvFrom: []
+
+  # Poller 配置
+  poller:
+    replicas: 2
+    resources: {}
+    privileged: false
+    nodeSelector: {}
+    extraVolumes: []
+    extraVolumeMounts: []
+    extraEnvs: []
+    extraEnvFrom: []
 
   # SNMP Scanner 配置
-  # 用於自動發現網路設備（需要在 LibreNMS Web UI 中啟用 SNMP network discovery）
+  # 用於自動發現網路設備
   snmp_scanner:
     enabled: true
-    # Cron 排程（每 15 分鐘執行）
     cron: "*/15 * * * *"
     resources: {}
     nodeSelector: {}
@@ -61,8 +101,7 @@ librenms:
       runAsUser: 1000
       runAsGroup: 1000
 
-  # RRDcached 配置（必須在 librenms 區塊內）
-  # 用於 RRD 資料快取，提升效能
+  # RRDcached 配置
   rrdcached:
     image:
       repository: crazymax/rrdcached
@@ -76,37 +115,26 @@ librenms:
         size: 5Gi
         storageClassName: "nfs-client"
     resources: {}
-
-# 資料庫配置 (內建 MySQL - Bitnami chart)
-# ⚠️ 重要：Bitnami chart 升級時的密碼驗證問題
-# 參考：https://github.com/bitnami/charts/issues/17477
-mysql:
-  enabled: true
-  auth:
-    database: librenms
-    username: librenms
-    # 使用預建立的 Secret（必須在部署前建立）
-    # Secret 必須包含 key: mysql-root-password, mysql-password
-    existingSecret: librenms-mysql-secret
-  # 跳過初始化腳本（避免升級時重新初始化）
-  initdbScriptsConfigMap: ""
-  primary:
-    persistence:
-      enabled: true
-      storageClass: "nfs-client"  # 使用 NFS StorageClass
-      size: 10Gi
-
-# Redis 配置
-# 啟用認證，密碼從 existingSecret 載入
-redis:
-  enabled: true
-  auth:
-    enabled: true
-    existingSecret: librenms-redis-secret
-    existingSecretPasswordKey: redis-password
-  master:
-    persistence:
-      storageClass: "nfs-client"  # 使用 NFS StorageClass
+    readinessProbe:
+      tcpSocket:
+        port: 42217
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    livenessProbe:
+      tcpSocket:
+        port: 42217
+      initialDelaySeconds: 15
+      periodSeconds: 20
+    envs:
+      - name: WRITE_JITTER
+        value: "1800"
+      - name: WRITE_TIMEOUT
+        value: "1800"
+    extraEnvs: []
+    extraEnvFrom: []
+    nodeSelector: {}
+    extraVolumes: []
+    extraVolumeMounts: []
 
 # Ingress 配置
 ingress:
@@ -126,29 +154,35 @@ ingress:
       hosts:
         - nms.k3s.ichiayi.com
 
-# 服務配置
-service:
-  type: ClusterIP
-  port: 80
+# MySQL 配置 (Bitnami subchart)
+mysql:
+  enabled: true
+  image:
+    repository: bitnamilegacy/mysql
+  auth:
+    database: librenms
+    username: librenms
+    existingSecret: librenms-mysql-secret
+  initdbScriptsConfigMap: ""
+  primary:
+    persistence:
+      enabled: true
+      storageClass: "nfs-client"
+      size: 10Gi
 
-# SNMP 配置
-snmp:
-  community: "public"
-
-# 環境變數
-env: {}
-
-# 額外的環境變數從 Secret 載入
-envFrom: []
-
-# 副本數
-replicaCount: 1
-
-# 節點選擇器
-nodeSelector: {}
-
-# 容忍度
-tolerations: []
-
-# 親和性
-affinity: {}
+# Redis 配置 (Bitnami subchart)
+redis:
+  enabled: true
+  image:
+    repository: bitnamilegacy/redis
+  auth:
+    enabled: true
+    existingSecret: librenms-redis-secret
+    existingSecretPasswordKey: redis-password
+  sentinel:
+    enabled: false
+  master:
+    disableCommands: []
+    persistence:
+      storageClass: "nfs-client"
+  architecture: standalone
