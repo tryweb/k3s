@@ -24,7 +24,11 @@ snmp-scan.py: error: Could not execute: /usr/bin/env php lnms config:get --dump
 
 ### Root Cause
 
-The `snmp_scanner` CronJob pod runs as root by default. The `snmp-scan.py` script internally calls `lnms config:get --dump`, which refuses to run as the root user for security reasons.
+1. **Docker image runs as root by default**: The LibreNMS Docker image ([Dockerfile](https://github.com/librenms/docker/blob/master/Dockerfile)) does not specify a `USER` directive, so the container runs as root by default. While the image creates a `librenms` user (UID 1000), the entrypoint `/init` runs as root.
+
+2. **Helm chart template lacks securityContext**: The `snmp_scanner` CronJob template in [librenms-cron.yml](https://github.com/librenms/helm-charts/blob/main/charts/librenms/templates/librenms-cron.yml) does not include any `securityContext` configuration.
+
+3. **lnms refuses to run as root**: The `snmp-scan.py` script internally calls `lnms config:get --dump`, which explicitly checks and refuses to run as the root user for security reasons.
 
 ### Expected Behavior
 
@@ -96,8 +100,8 @@ spec:
 
 ### Environment
 
-- Helm Chart Version: latest (as of 2024)
-- Kubernetes Version: v1.28+
+- Helm Chart Version: 6.01
+- Kubernetes Version: v1.33.5 +k3s1
 - LibreNMS Docker Image: librenms/librenms:latest
 
 ### Additional Context
