@@ -89,17 +89,18 @@ librenms:
   snmp_scanner:
     enabled: true
     cron: "*/15 * * * *"
+    # 安全上下文 - 以 librenms 用戶身分執行（UID 1000）
+    # 解決 "lnms must not run as root" 錯誤
+    # 參考: https://github.com/librenms/helm-charts/pull/162
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
     resources: {}
     nodeSelector: {}
     extraEnvs: []
     extraEnvFrom: []
-    # 安全上下文 - 以 librenms 用戶身分執行（UID 1000）
-    # 解決 "lnms must not run as root" 錯誤
-    # 測試 PR: https://github.com/librenms/helm-charts/pull/XXX
-    # securityContext:
-    #   runAsNonRoot: true
-    #   runAsUser: 1000
-    #   runAsGroup: 1000
 
   # RRDcached 配置
   rrdcached:
