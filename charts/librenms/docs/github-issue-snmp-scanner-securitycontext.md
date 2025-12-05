@@ -1,7 +1,7 @@
 # GitHub Issue: Add securityContext support for snmp_scanner CronJob
 
 ## Title
-**[Feature Request] Add securityContext support for snmp_scanner to run as non-root user**
+**[Bug] snmp_scanner securityContext blocked by values.schema.json in v6.0+ (regression from v5.2.0)**
 
 ---
 
@@ -9,10 +9,19 @@
 
 ### Description
 
-The `snmp_scanner` CronJob fails to execute because it runs as root by default, but the `lnms` CLI tool explicitly requires running as a non-root user.
+Starting from Helm chart version 6.0, the `snmp_scanner` CronJob cannot be configured with `securityContext` due to the newly introduced `values.schema.json` validation. This is a regression from v5.2.0 where `securityContext` worked correctly.
 
-### Error Message
+Without `securityContext`, the CronJob runs as root by default, but the `lnms` CLI tool explicitly refuses to run as root, causing the snmp_scanner to fail.
 
+### Error Messages
+
+**Schema validation error (during helm upgrade):**
+```
+Values don't meet the specifications of the schema(s) in the following chart(s):
+librenms: - at '/librenms/snmp_scanner': additional properties 'securityContext' not allowed
+```
+
+**Runtime error (if securityContext is not set):**
 ```
 usage: snmp-scan.py [-h] [-t THREADS] [-g GROUP] [-o] [-l] [-v]
                     [--ping-fallback] [--ping-only] [-P]
@@ -24,95 +33,124 @@ snmp-scan.py: error: Could not execute: /usr/bin/env php lnms config:get --dump
 
 ### Root Cause
 
-1. **Docker image runs as root by default**: The LibreNMS Docker image ([Dockerfile](https://github.com/librenms/docker/blob/master/Dockerfile)) does not specify a `USER` directive, so the container runs as root by default. While the image creates a `librenms` user (UID 1000), the entrypoint `/init` runs as root.
+In chart version 6.0, a `values.schema.json` file was added with strict validation. The `snmp_scanner` object is defined with `"additionalProperties": false`, which blocks any properties not explicitly listed in the schema:
 
-2. **Helm chart template lacks securityContext**: The `snmp_scanner` CronJob template in [librenms-cron.yml](https://github.com/librenms/helm-charts/blob/main/charts/librenms/templates/librenms-cron.yml) does not include any `securityContext` configuration.
+```json
+"snmp_scanner": {
+  "type": "object",
+  "additionalProperties": false,  // <-- This blocks securityContext
+  "properties": {
+    "enabled": { ... },
+    "cron": { ... },
+    "resources": { ... },
+    "nodeSelector": { ... },
+    "extraEnvs": { ... },
+    "extraEnvFrom": { ... }
+    // securityContext is NOT listed here
+  }
+}
+```
 
-3. **lnms refuses to run as root**: The `snmp-scan.py` script internally calls `lnms config:get --dump`, which explicitly checks and refuses to run as the root user for security reasons.
-
-### Expected Behavior
-
-The `snmp_scanner` CronJob should run as the `librenms` user (UID 1000) to match the container's intended user and allow `lnms` commands to execute properly.
-
-### Proposed Solution
-
-Add `securityContext` support to the `snmp_scanner` configuration in `values.yaml` and update the corresponding template.
-
-#### values.yaml changes
+**In v5.2.0:** No `values.schema.json` existed, so the following configuration worked:
 
 ```yaml
 librenms:
   snmp_scanner:
     enabled: true
-    cron: "15 * * * *"
-    resources: {}
-    nodeSelector: {}
-    extraEnvs: []
-    extraEnvFrom: []
-    # New: Security context configuration
+    cron: "*/15 * * * *"
     securityContext:
-      runAsNonRoot: true
       runAsUser: 1000
       runAsGroup: 1000
+      fsGroup: 1000
 ```
 
-#### values.schema.json changes
+**In v6.0+:** The schema validation rejects `securityContext` as an unknown property.
 
-Add `securityContext` to the `snmp_scanner` properties:
+### Proposed Solution
+
+Add `securityContext` to the `snmp_scanner` schema definition in `values.schema.json`:
 
 ```json
-"securityContext": {
+"snmp_scanner": {
   "type": "object",
-  "description": "Security context for the snmp_scanner pod",
+  "additionalProperties": false,
   "properties": {
-    "runAsNonRoot": { "type": "boolean" },
-    "runAsUser": { "type": "integer" },
-    "runAsGroup": { "type": "integer" },
-    "fsGroup": { "type": "integer" }
+    "enabled": {
+      "type": "boolean",
+      "description": "SNMP scanner enabled",
+      "default": false
+    },
+    "cron": {
+      "type": "string",
+      "description": "SNMP scanner cron schedule",
+      "default": "15 * * * *"
+    },
+    "resources": {
+      "type": "object",
+      "description": "Computing resources for SNMP scanner containers"
+    },
+    "nodeSelector": {
+      "$ref": "#/definitions/nodeSelector"
+    },
+    "extraEnvs": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/envVar" },
+      "description": "Extra environment variables for SNMP scanner containers",
+      "default": []
+    },
+    "extraEnvFrom": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/envFromSource" },
+      "description": "Extra envFrom sources for SNMP scanner containers",
+      "default": []
+    },
+    "securityContext": {
+      "type": "object",
+      "description": "Security context for the snmp_scanner pod. Required to run as non-root user (UID 1000) since lnms refuses to run as root.",
+      "properties": {
+        "runAsNonRoot": { "type": "boolean" },
+        "runAsUser": { "type": "integer" },
+        "runAsGroup": { "type": "integer" },
+        "fsGroup": { "type": "integer" }
+      }
+    }
   }
 }
 ```
 
-#### Template changes (templates/librenms-cron.yml)
-
-Add security context to the snmp_scanner CronJob pod spec:
+Also update `templates/librenms-cron.yml` to use the securityContext:
 
 ```yaml
-{{- if .Values.librenms.snmp_scanner.enabled }}
----
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: {{ include "librenms.fullname" . }}-snmp-scanner
 spec:
-  schedule: {{ .Values.librenms.snmp_scanner.cron | quote }}
-  jobTemplate:
-    spec:
-      template:
-        spec:
-          {{- with .Values.librenms.snmp_scanner.securityContext }}
-          securityContext:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          # ... rest of the spec
-{{- end }}
+  {{- with .Values.librenms.snmp_scanner.securityContext }}
+  securityContext:
+    {{- toYaml . | nindent 12 }}
+  {{- end }}
 ```
 
 ### Environment
 
-- Helm Chart Version: 6.01
-- Kubernetes Version: v1.33.5 +k3s1
-- LibreNMS Docker Image: librenms/librenms:latest
+- Helm Chart Version: 6.0.1
+- Kubernetes Version: v1.33.5+k3s1
+- Working Version: 5.2.0 (securityContext was accepted)
 
-### Additional Context
+### Steps to Reproduce
 
-- The LibreNMS Docker image creates a `librenms` user with UID/GID 1000 by default
-- Other components (frontend, poller) may also benefit from `securityContext` support
-- Running containers as non-root is a Kubernetes security best practice (Pod Security Standards)
+1. Install LibreNMS Helm chart v6.0+
+2. Configure `snmp_scanner` with `securityContext`:
+   ```yaml
+   librenms:
+     snmp_scanner:
+       enabled: true
+       securityContext:
+         runAsUser: 1000
+         runAsGroup: 1000
+   ```
+3. Run `helm upgrade` - schema validation fails
 
 ### Workaround
 
-Currently, the only workaround is to disable `snmp_scanner`:
+Downgrade to chart version 5.2.0, or disable `snmp_scanner`:
 
 ```yaml
 librenms:
@@ -124,4 +162,4 @@ librenms:
 
 - [Kubernetes Pod Security Standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/)
 - [Configure a Security Context for a Pod or Container](https://kubernetes.io/docs/tasks/configure-pod-container/security-context/)
-- LibreNMS Docker image user configuration: `PUID=1000`, `PGID=1000`
+- LibreNMS Docker image user: `librenms` (UID/GID 1000)

@@ -1,0 +1,13 @@
+--- a/charts/librenms/templates/librenms-cron.yml
++++ b/charts/librenms/templates/librenms-cron.yml
+@@ -14,6 +14,10 @@ spec:
+           nodeSelector:
+             {{- toYaml . | nindent 12 }}
+           {{- end }}
++          {{- with .Values.librenms.snmp_scanner.securityContext }}
++          securityContext:
++            {{- toYaml . | nindent 12 }}
++          {{- end }}
+           volumes:
+           - name: files
+             configMap:

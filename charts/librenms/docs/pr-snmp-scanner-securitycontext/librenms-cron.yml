@@ -1,0 +1,64 @@
+{{- if .Values.librenms.snmp_scanner.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-snmp-scanner
+spec:
+  schedule: "{{.Values.librenms.snmp_scanner.cron }}"
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          annotations:
+            checksum/config: {{ include "librenms.configChecksum" . }}
+        spec:
+          {{- with .Values.librenms.snmp_scanner.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.librenms.snmp_scanner.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumes:
+          - name: files
+            configMap:
+              name: {{ .Release.Name }}-files
+          containers:
+          - name: snmp-scanner
+            image: '{{ .Values.librenms.image.repository }}:{{ .Values.librenms.image.tag }}'
+            imagePullPolicy: Always
+            envFrom:
+            - configMapRef:
+                name: {{ .Release.Name }}
+            {{- with .Values.librenms.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- with .Values.librenms.snmp_scanner.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-mysql
+                  key: mysql-password
+            {{- with .Values.librenms.extraEnvs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- with .Values.librenms.snmp_scanner.extraEnvs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            volumeMounts:
+            - name: files
+              mountPath: /opt/librenms/config.d/custom.php
+              subPath: custom.php
+              readOnly: true
+            command:
+            - '/opt/librenms/snmp-scan.py'
+            - '-v'
+            {{- if .Values.librenms.snmp_scanner.resources }}
+            resources: {{ toYaml .Values.librenms.snmp_scanner.resources | nindent 14 }}
+            {{- end }}
+          restartPolicy: OnFailure
+{{ end }}

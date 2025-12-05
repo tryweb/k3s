@@ -6,12 +6,15 @@ defaultNamespace: librenms
 
 # Helm 配置
 helm:
-  # 使用官方 LibreNMS Helm Chart
-  repo: https://www.librenms.org/helm-charts
-  chart: librenms
-  # 指定版本 - 重要：需要定期檢查並更新此版本號
-  # 查看最新版本: helm search repo librenms/librenms --versions
-  version: ""  # 留空使用最新版本，或指定如 "1.0.0"
+  # 測試 PR: fix/snmp-scanner-securitycontext
+  # 原始官方 repo: https://www.librenms.org/helm-charts
+  # 原始 chart: librenms
+  # 原始 version: ""
+
+  # 使用 Git repo 來源測試 PR 分支
+  repo: https://github.com/tryweb/librenms-helm-charts
+  chart: charts/librenms
+  version: fix/snmp-scanner-securitycontext  # Git 分支名稱
 
   # 明確指定 Helm release 名稱
   # 這會影響 LibreNMS poller 尋找的 MySQL Secret 名稱（<releaseName>-mysql）
