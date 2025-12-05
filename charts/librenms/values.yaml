@@ -75,7 +75,7 @@ librenms:
 
   # Poller 配置
   poller:
-    replicas: 2
+    replicas: 3
     resources: {}
     privileged: false
     nodeSelector: {}
