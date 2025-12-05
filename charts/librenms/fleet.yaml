@@ -11,10 +11,9 @@ helm:
   # 原始 chart: librenms
   # 原始 version: ""
 
-  # 使用 Git repo 來源測試 PR 分支
-  repo: https://github.com/tryweb/librenms-helm-charts
-  chart: charts/librenms
-  version: fix/snmp-scanner-securitycontext  # Git 分支名稱
+  # 使用 go-getter URL 格式從 Git repo 下載 chart
+  # 格式: git::https://github.com/<org>/<repo>//<path>?ref=<branch>
+  chart: git::https://github.com/tryweb/librenms-helm-charts//charts/librenms?ref=fix/snmp-scanner-securitycontext
 
   # 明確指定 Helm release 名稱
   # 這會影響 LibreNMS poller 尋找的 MySQL Secret 名稱（<releaseName>-mysql）
