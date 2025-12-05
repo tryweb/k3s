@@ -18,7 +18,7 @@ librenms:
   # 映像檔設定（必填）
   image:
     repository: librenms/librenms
-    tag: "25.11.0"
+    tag: "25.11.0-r0"
 
   # 應用程式密鑰
   # 注意：此值會被 existingSecret 覆蓋，但 chart schema 要求必須提供字串值
@@ -96,10 +96,10 @@ librenms:
     # 安全上下文 - 以 librenms 用戶身分執行（UID 1000）
     # 解決 "lnms must not run as root" 錯誤
     # 測試 PR: https://github.com/librenms/helm-charts/pull/XXX
-    securityContext:
-      runAsNonRoot: true
-      runAsUser: 1000
-      runAsGroup: 1000
+    # securityContext:
+    #   runAsNonRoot: true
+    #   runAsUser: 1000
+    #   runAsGroup: 1000
 
   # RRDcached 配置
   rrdcached:
