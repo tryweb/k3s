@@ -7,6 +7,11 @@
 
 # LibreNMS 核心配置
 librenms:
+  # 映像檔設定（schema 要求必填）
+  image:
+    repository: librenms/librenms
+    tag: "25.11.0"
+
   # 應用程式密鑰
   # 注意：此值會被 existingSecret 覆蓋，但 chart schema 要求必須提供字串值
   appkey: "placeholder-will-be-overridden-by-secret"
