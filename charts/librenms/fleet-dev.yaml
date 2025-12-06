@@ -1,0 +1,45 @@
+# Fleet GitOps 配置檔案 - 開發環境
+# 使用 fork repo 的 PR 分支測試修正
+#
+# 使用方式：
+#   1. 執行 ./scripts/generate-values-dev.sh 產生 values-dev.yaml
+#   2. ln -sf fleet-dev.yaml fleet.yaml
+#   3. git commit 後 Fleet 會自動部署
+#
+# 注意：使用 git:: URL 下載 chart 時，不會自動合併 chart 的預設 values.yaml
+#       必須使用 values-dev.yaml（包含完整預設值 + 自訂值）
+
+defaultNamespace: librenms
+
+helm:
+  # 開發環境：使用 fork repo 的 PR 分支
+  # 用於測試尚未合併到官方的修正
+  chart: git::https://github.com/tryweb/librenms-helm-charts//charts/librenms?ref=fix/snmp-scanner-securitycontext
+
+  releaseName: librenms
+
+  # 開發環境必須使用 values-dev.yaml（包含完整預設值）
+  # 產生方式: ./scripts/generate-values-dev.sh --repo tryweb/librenms-helm-charts --branch fix/snmp-scanner-securitycontext
+  valuesFiles:
+    - values-dev.yaml
+
+  valuesFrom:
+    - secretKeyRef:
+        name: librenms-helm-values
+        namespace: librenms
+        key: values.yaml
+
+  force: false
+  waitForJobs: true
+
+targets:
+  - name: default
+    clusterSelector: {}
+
+diff:
+  comparePatches:
+    - apiVersion: v1
+      kind: Secret
+      operations:
+        - op: remove
+          path: /data

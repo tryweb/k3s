@@ -6,17 +6,102 @@
 
 ```
 charts/librenms/
-├── README.md              # 本說明文件
-├── fleet.yaml             # Rancher Fleet 配置
-├── values.yaml            # 基礎 Helm values
-├── values-production.yaml # 生產環境覆蓋配置
-├── values-staging.yaml    # 測試環境覆蓋配置
+├── README.md                  # 本說明文件
+├── fleet.yaml                 # Rancher Fleet 配置（環境選擇入口）
+├── fleet-dev.yaml             # 開發環境配置（使用 fork repo PR 分支）
+├── fleet-prod.yaml            # 正式環境配置（使用官方 Helm repo）
+├── values-dev.yaml            # 開發環境完整值（由腳本產生，包含預設值+自訂值）
+├── values-custom.yaml         # 自訂值（只包含非預設值設定）
 ├── scripts/
-│   ├── create-secrets.sh  # Secret 自動建立腳本
-│   └── copy-tls-secret.sh # TLS 憑證複製腳本
-└── templates/
-    └── secrets.yaml       # Secret 範例模板（參考用）
+│   ├── generate-values-dev.sh # 產生開發環境 values 檔案
+│   ├── create-secrets.sh      # Secret 自動建立腳本
+│   └── copy-tls-secret.sh     # TLS 憑證複製腳本
+└── docs/                      # 問題追蹤與 PR 文件
 ```
+
+## 環境切換
+
+本專案支援在**開發環境**（測試 PR 分支）與**正式環境**（官方 release）之間快速切換。
+
+### 可用環境
+
+| 環境 | 配置檔案 | Chart 來源 | 用途 |
+|-----|---------|-----------|------|
+| 開發 | `fleet-dev.yaml` | fork repo PR 分支 | 測試尚未合併的修正 |
+| 正式 | `fleet-prod.yaml` | 官方 Helm repo | 穩定版本部署 |
+
+### 切換方式
+
+#### 方法 1：修改 fleet.yaml（推薦）
+
+編輯 `fleet.yaml`，切換註解的 chart 和 valuesFiles 設定：
+
+```yaml
+helm:
+  # --- 開發環境：使用 fork repo PR 分支 ---
+  chart: git::https://github.com/tryweb/librenms-helm-charts//charts/librenms?ref=fix/snmp-scanner-securitycontext
+
+  # --- 正式環境：使用官方 Helm repo ---
+  # repo: https://www.librenms.org/helm-charts
+  # chart: librenms
+  # version: "0.1.7"
+
+  valuesFiles:
+    - values-dev.yaml      # 開發環境（包含完整預設值）
+    # - values-custom.yaml # 正式環境（只包含自訂值）
+```
+
+切換到正式環境時：
+1. 註解開發環境的 `chart`，取消註解正式環境的 `repo`、`chart`、`version`
+2. 註解 `values-dev.yaml`，取消註解 `values-custom.yaml`
+
+#### 方法 2：使用符號連結
+
+```bash
+# 切換到開發環境
+ln -sf fleet-dev.yaml fleet.yaml
+
+# 切換到正式環境
+ln -sf fleet-prod.yaml fleet.yaml
+
+# 提交變更
+git add fleet.yaml
+git commit -m "Switch to production environment"
+```
+
+### Values 檔案說明
+
+| 檔案 | 用途 | 說明 |
+|-----|------|------|
+| `values-dev.yaml` | 開發環境 | **完整預設值 + 自訂值**，由腳本產生 |
+| `values-custom.yaml` | 正式環境 | **只包含非預設值**，chart 自動套用預設值 |
+
+### 為什麼需要 values-dev.yaml？
+
+開發環境使用 `git::` URL 格式下載 chart 時（例如測試 PR 分支），Fleet/Helm **不會**自動合併 chart 內建的 `values.yaml` 預設值。因此必須提供完整的 values 檔案。
+
+**正式環境**使用 Helm repo 時，chart 會自動套用預設值，所以只需要 `values-custom.yaml`。
+
+### 產生 values-dev.yaml
+
+使用腳本合併官方預設值與自訂值：
+
+```bash
+cd charts/librenms
+
+# 使用官方 repo 的預設值
+./scripts/generate-values-dev.sh
+
+# 使用 fork repo 的預設值（測試 PR 分支時）
+./scripts/generate-values-dev.sh --repo tryweb/librenms-helm-charts --branch fix/snmp-scanner-securitycontext
+```
+
+腳本會：
+1. 從指定的 GitHub repo/branch 下載 `values.yaml` 預設值
+2. 與 `values-custom.yaml` 合併
+3. 產生 `values-dev.yaml`
+
+> **注意**：修改 `values-custom.yaml` 後，需要重新執行腳本更新 `values-dev.yaml`
 
 ## 快速開始
 

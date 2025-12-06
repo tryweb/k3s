@@ -1,0 +1,156 @@
+# LibreNMS Helm Chart - 開發環境完整值
+#
+# !! 此檔案由 scripts/generate-values-dev.sh 自動產生 !!
+# !! 請勿手動編輯，修改請編輯 values-custom.yaml 後重新執行腳本 !!
+#
+# 產生方式: ./scripts/generate-values-dev.sh
+#
+# 此檔案包含:
+#   1. 官方 chart 預設值 (從 GitHub 下載)
+#   2. values-custom.yaml 的自訂值覆蓋
+#
+# 用途: 開發環境使用 git:: URL 下載 chart 時需要完整的 values
+
+global:
+  security:
+    allowInsecureImages: true
+librenms:
+  image:
+    repository: librenms/librenms
+    tag: 25.11.0
+  appkey: null
+  existingSecret: librenms-app-secret
+  timezone: UTC
+  configuration: '$config[''distributed_poller_group'']          = ''0'';
+
+    $config[''distributed_poller'']                = true;
+
+    '
+  extraEnvs:
+  - name: REDIS_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: librenms-redis-secret
+        key: redis-password
+  extraEnvFrom: []
+  privileged: false
+  initContainer:
+    image:
+      repository: busybox
+      tag: '1.37'
+    resources: {}
+  frontend:
+    replicas: 1
+    readinessProbe:
+      httpGet:
+        path: /login
+        port: 8000
+      initialDelaySeconds: 30
+      periodSeconds: 60
+      timeoutSeconds: 10
+    resources: {}
+    privileged: false
+    nodeSelector: {}
+    extraVolumes: []
+    extraVolumeMounts: []
+    extraEnvs: []
+    extraEnvFrom: []
+  poller:
+    replicas: 3
+    resources: {}
+    privileged: false
+    nodeSelector: {}
+    extraVolumes: []
+    extraVolumeMounts: []
+    extraEnvs: []
+    extraEnvFrom: []
+  snmp_scanner:
+    enabled: true
+    cron: '*/15 * * * *'
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+    resources: {}
+    nodeSelector: {}
+    extraEnvs: []
+    extraEnvFrom: []
+  rrdcached:
+    image:
+      repository: crazymax/rrdcached
+      tag: 1.8.0
+    persistence:
+      enabled: true
+      journal:
+        size: 1Gi
+        storageClassName: nfs-client
+      rrdcached:
+        size: 5Gi
+        storageClassName: nfs-client
+    resources: {}
+    readinessProbe:
+      tcpSocket:
+        port: 42217
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    livenessProbe:
+      tcpSocket:
+        port: 42217
+      initialDelaySeconds: 15
+      periodSeconds: 20
+    envs:
+    - name: WRITE_JITTER
+      value: '1800'
+    - name: WRITE_TIMEOUT
+      value: '1800'
+    extraEnvs: []
+    extraEnvFrom: []
+    nodeSelector: {}
+    extraVolumes: []
+    extraVolumeMounts: []
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/proxy-body-size: 64m
+    nginx.ingress.kubernetes.io/ssl-redirect: 'false'
+  hosts:
+  - host: nms.k3s.ichiayi.com
+    paths:
+    - path: /
+      pathType: Prefix
+  tls:
+  - secretName: wildcard-k3s-ichiayi-com-tls
+    hosts:
+    - nms.k3s.ichiayi.com
+mysql:
+  enabled: true
+  image:
+    repository: bitnamilegacy/mysql
+  auth:
+    username: librenms
+    database: librenms
+    existingSecret: librenms-mysql-secret
+  primary:
+    persistence:
+      enabled: true
+      storageClass: nfs-client
+      size: 10Gi
+redis:
+  enabled: true
+  image:
+    repository: bitnamilegacy/redis
+  auth:
+    enabled: true
+    sentinel: false
+    existingSecret: librenms-redis-secret
+    existingSecretPasswordKey: redis-password
+  sentinel:
+    enabled: false
+  master:
+    disableCommands: []
+    persistence:
+      storageClass: nfs-client
+  architecture: standalone

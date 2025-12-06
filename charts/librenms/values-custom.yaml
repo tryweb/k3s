@@ -1,0 +1,85 @@
+# LibreNMS Helm Chart - 自訂值
+# 此檔案只包含與官方預設值不同的設定
+# 官方預設值參考: https://github.com/librenms/helm-charts/blob/main/charts/librenms/values.yaml
+#
+# 敏感資訊（密碼、密鑰）請使用 Kubernetes Secret 管理
+# 參閱 README.md 的「敏感資訊管理」章節
+
+# ============================================================
+# LibreNMS 核心配置
+# ============================================================
+librenms:
+  # APP_KEY 從 Secret 載入
+  # 必須先建立 Secret: librenms-app-secret (包含 appkey)
+  existingSecret: librenms-app-secret
+
+  # 從 Secret 載入 Redis 密碼
+  extraEnvs:
+    - name: REDIS_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: librenms-redis-secret
+          key: redis-password
+
+  # Poller 配置 (預設: 2)
+  poller:
+    replicas: 3
+
+  # SNMP Scanner 配置 (預設: disabled)
+  snmp_scanner:
+    enabled: true
+    cron: "*/15 * * * *"  # 每 15 分鐘 (預設: 15 * * * *, 即每小時的第 15 分鐘)
+
+  # RRDcached 持久化儲存
+  rrdcached:
+    persistence:
+      journal:
+        storageClassName: "nfs-client"
+      rrdcached:
+        size: 5Gi  # 預設: 10Gi
+        storageClassName: "nfs-client"
+
+# ============================================================
+# Ingress 配置 (預設: disabled)
+# ============================================================
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+  hosts:
+    - host: nms.k3s.ichiayi.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: wildcard-k3s-ichiayi-com-tls
+      hosts:
+        - nms.k3s.ichiayi.com
+
+# ============================================================
+# MySQL 配置 (Bitnami subchart)
+# ============================================================
+mysql:
+  auth:
+    # 密碼從 Secret 載入 (預設: 自動生成)
+    existingSecret: librenms-mysql-secret
+  primary:
+    persistence:
+      enabled: true
+      storageClass: "nfs-client"
+      size: 10Gi
+
+# ============================================================
+# Redis 配置 (Bitnami subchart)
+# ============================================================
+redis:
+  auth:
+    enabled: true  # 預設: false
+    existingSecret: librenms-redis-secret
+    existingSecretPasswordKey: redis-password
+  master:
+    persistence:
+      storageClass: "nfs-client"

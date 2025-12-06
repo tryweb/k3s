@@ -1,0 +1,43 @@
+# Fleet GitOps 配置檔案 - 正式環境
+# 使用官方 release 的穩定版本
+#
+# 使用方式：
+#   ln -sf fleet-prod.yaml fleet.yaml
+#   或
+#   git commit 後 Fleet 會自動部署
+
+defaultNamespace: librenms
+
+helm:
+  # 正式環境：使用官方 Helm repo
+  repo: https://www.librenms.org/helm-charts
+  chart: librenms
+  # 指定版本以確保穩定性，更新前請先在開發環境測試
+  # 查看可用版本：helm search repo librenms/librenms --versions
+  version: "0.1.7"
+
+  releaseName: librenms
+
+  valuesFiles:
+    - values-custom.yaml
+
+  valuesFrom:
+    - secretKeyRef:
+        name: librenms-helm-values
+        namespace: librenms
+        key: values.yaml
+
+  force: false
+  waitForJobs: true
+
+targets:
+  - name: default
+    clusterSelector: {}
+
+diff:
+  comparePatches:
+    - apiVersion: v1
+      kind: Secret
+      operations:
+        - op: remove
+          path: /data

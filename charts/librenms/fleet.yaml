@@ -1,72 +1,63 @@
-# Fleet GitOps 配置檔案
-# 用於 Rancher Fleet 自動部署 LibreNMS
+# Fleet GitOps 配置檔案 - 環境選擇入口
+#
+# 切換環境方式：
+#   方法 1: 修改下方 helm.chart 和 valuesFiles 設定
+#   方法 2: 使用符號連結
+#          ln -sf fleet-dev.yaml fleet.yaml   # 切換到開發環境
+#          ln -sf fleet-prod.yaml fleet.yaml  # 切換到正式環境
+#
+# 可用環境配置：
+#   - fleet-dev.yaml  : 使用 fork repo PR 分支 (測試修正)
+#   - fleet-prod.yaml : 使用官方 Helm repo release (穩定版本)
+#
+# values 檔案說明：
+#   - values-dev.yaml        : 開發環境用 (包含完整預設值 + 自訂值)
+#   - values-custom.yaml     : 自訂值 (只包含非預設值，正式環境用)
+#
+# 注意：開發環境使用 git:: URL 時，不會自動合併 chart 預設值
+#       必須先執行 ./scripts/generate-values-dev.sh 產生 values-dev.yaml
+# ============================================================
 
-# 預設命名空間
 defaultNamespace: librenms
 
-# Helm 配置
 helm:
-  # 測試 PR: fix/snmp-scanner-securitycontext
-  # 原始官方 repo: https://www.librenms.org/helm-charts
-  # 原始 chart: librenms
-  # 原始 version: ""
+  # ============================================================
+  # 環境切換：取消註解所需的環境設定
+  # ============================================================
 
-  # 使用 go-getter URL 格式從 Git repo 下載 chart
-  # 格式: git::https://github.com/<org>/<repo>//<path>?ref=<branch>
+  # --- 開發環境：使用 fork repo PR 分支 ---
+  # 注意：必須使用 values-dev.yaml（包含完整預設值）
+  # 產生方式: ./scripts/generate-values-dev.sh --repo tryweb/librenms-helm-charts --branch fix/snmp-scanner-securitycontext
   chart: git::https://github.com/tryweb/librenms-helm-charts//charts/librenms?ref=fix/snmp-scanner-securitycontext
 
-  # 明確指定 Helm release 名稱
-  # 這會影響 LibreNMS poller 尋找的 MySQL Secret 名稱（<releaseName>-mysql）
-  # 若不指定，Fleet 會自動生成：<GitRepo名稱>-<路徑>（可能很長且難以預測）
+  # --- 正式環境：使用官方 Helm repo ---
+  # 注意：可使用 values-custom.yaml（chart 會自動套用預設值）
+  # repo: https://www.librenms.org/helm-charts
+  # chart: librenms
+  # version: "0.1.7"
+
+  # ============================================================
+
   releaseName: librenms
 
-  # 值檔案路徑（相對於此 fleet.yaml）
+  # 開發環境使用 values-dev.yaml，正式環境使用 values-custom.yaml
   valuesFiles:
-    - values.yaml
+    - values-dev.yaml      # 開發環境（包含完整預設值）
+    # - values-custom.yaml # 正式環境（只包含自訂值）
 
-  # 從 Secret 讀取 MySQL 密碼（解決 Bitnami chart 升級時的密碼驗證問題）
-  # Secret 中的 values.yaml key 包含 YAML 格式的 mysql.auth.rootPassword 和 mysql.auth.password
-  # 參考：https://fleet.rancher.io/ref-fleet-yaml
   valuesFrom:
     - secretKeyRef:
         name: librenms-helm-values
         namespace: librenms
         key: values.yaml
 
-  # 強制升級（解決某些 CRD 問題）
   force: false
-
-  # 等待所有 Pod 就緒
   waitForJobs: true
 
-# 部署目標 - 必須指定才能部署
-# 使用空的 clusterSelector 匹配所有叢集
 targets:
   - name: default
     clusterSelector: {}
 
-# 目標叢集自訂配置（可選）
-# 針對特定標籤的叢集使用不同的 values 檔案
-targetCustomizations:
-  - name: production
-    clusterSelector:
-      matchLabels:
-        env: production
-    helm:
-      valuesFiles:
-        - values.yaml
-        - values-production.yaml
-  
-  - name: staging
-    clusterSelector:
-      matchLabels:
-        env: staging
-    helm:
-      valuesFiles:
-        - values.yaml
-        - values-staging.yaml
-
-# 差異配置
 diff:
   comparePatches:
     - apiVersion: v1
