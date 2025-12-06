@@ -28,7 +28,7 @@ librenms:
   # SNMP Scanner 配置 (預設: disabled)
   snmp_scanner:
     enabled: true
-    cron: "*/15 * * * *"  # 每 15 分鐘 (預設: 15 * * * *, 即每小時的第 15 分鐘)
+    cron: "23 * * * *"  # 每小時 23 分執行一次 (預設: 15 * * * *, 即每小時的第 15 分鐘)
 
   # RRDcached 持久化儲存
   rrdcached:
