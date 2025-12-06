@@ -28,6 +28,14 @@ jobs:
         with:
           version: 'v3.13.3'
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install PyYAML
+        run: pip install pyyaml
+
       - name: Add Helm repositories
         run: |
           helm repo add librenms https://www.librenms.org/helm-charts
@@ -36,36 +44,33 @@ jobs:
       - name: Validate YAML syntax
         run: |
           echo "Validating YAML syntax..."
-          for file in charts/librenms/values*.yaml; do
-            echo "Checking $file"
-            python3 -c "import yaml; yaml.safe_load(open('$file'))" && echo "✓ $file is valid YAML"
+          for file in charts/librenms/values-custom.yaml charts/librenms/values-dev.yaml charts/librenms/fleet*.yaml; do
+            if [ -f "$file" ]; then
+              echo "Checking $file"
+              python3 -c "import yaml; yaml.safe_load(open('$file'))" && echo "✓ $file is valid YAML"
+            fi
           done
 
-      - name: Template test - base values
+      - name: Template test - production (values-custom.yaml)
         run: |
-          echo "Testing base values..."
+          echo "Testing production values (values-custom.yaml)..."
           helm template librenms librenms/librenms \
-            -f charts/librenms/values.yaml \
-            --debug 2>&1 | head -50
-          echo "✓ Base values template succeeded"
-
-      - name: Template test - staging
-        run: |
-          echo "Testing staging values..."
-          helm template librenms librenms/librenms \
-            -f charts/librenms/values.yaml \
-            -f charts/librenms/values-staging.yaml \
-            --debug 2>&1 | head -50
-          echo "✓ Staging values template succeeded"
-
-      - name: Template test - production
-        run: |
-          echo "Testing production values..."
-          helm template librenms librenms/librenms \
-            -f charts/librenms/values.yaml \
-            -f charts/librenms/values-production.yaml \
+            -f charts/librenms/values-custom.yaml \
             --debug 2>&1 | head -50
           echo "✓ Production values template succeeded"
+
+      - name: Template test - development (values-dev.yaml)
+        run: |
+          echo "Testing development values (values-dev.yaml)..."
+          if [ -f "charts/librenms/values-dev.yaml" ]; then
+            helm template librenms librenms/librenms \
+              -f charts/librenms/values-dev.yaml \
+              --debug 2>&1 | head -50
+            echo "✓ Development values template succeeded"
+          else
+            echo "⚠ values-dev.yaml not found, skipping..."
+            echo "  Run ./scripts/generate-values-dev.sh to generate it"
+          fi
 
   security-scan:
     name: Security Scan
@@ -89,7 +94,7 @@ jobs:
         run: |
           mkdir -p /tmp/manifests
           helm template librenms librenms/librenms \
-            -f charts/librenms/values.yaml \
+            -f charts/librenms/values-custom.yaml \
             > /tmp/manifests/librenms.yaml
           echo "Generated manifest size: $(wc -l < /tmp/manifests/librenms.yaml) lines"
 
@@ -121,9 +126,17 @@ jobs:
 
       - name: Check LibreNMS chart versions
         run: |
-          echo "Available LibreNMS chart versions:"
+          echo "=== Available LibreNMS chart versions ==="
           helm search repo librenms/librenms --versions | head -10
-          
+
           echo ""
-          echo "Currently configured version in fleet.yaml:"
-          grep -A2 "chart: librenms" charts/librenms/fleet.yaml || echo "Using latest version"
+          echo "=== Currently configured in fleet.yaml ==="
+          if grep -q "^  repo:" charts/librenms/fleet.yaml; then
+            echo "Mode: Production (Helm repo)"
+            grep -E "^\s*(repo|chart|version):" charts/librenms/fleet.yaml | head -5
+          elif grep -q "^  chart: git::" charts/librenms/fleet.yaml; then
+            echo "Mode: Development (Git URL)"
+            grep "chart: git::" charts/librenms/fleet.yaml
+          else
+            echo "Mode: Unknown"
+          fi
