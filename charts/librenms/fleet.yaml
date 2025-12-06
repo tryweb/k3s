@@ -28,13 +28,13 @@ helm:
   # --- 開發環境：使用 fork repo PR 分支 ---
   # 注意：必須使用 values-dev.yaml（包含完整預設值）
   # 產生方式: ./scripts/generate-values-dev.sh --repo tryweb/librenms-helm-charts --branch fix/snmp-scanner-securitycontext
-  chart: git::https://github.com/tryweb/librenms-helm-charts//charts/librenms?ref=fix/snmp-scanner-securitycontext
+  # chart: git::https://github.com/tryweb/librenms-helm-charts//charts/librenms?ref=fix/snmp-scanner-securitycontext
 
   # --- 正式環境：使用官方 Helm repo ---
   # 注意：可使用 values-custom.yaml（chart 會自動套用預設值）
-  # repo: https://www.librenms.org/helm-charts
-  # chart: librenms
-  # version: "0.1.7"
+  repo: https://www.librenms.org/helm-charts
+  chart: librenms
+  version: "6.1.0"
 
   # ============================================================
 
@@ -42,8 +42,8 @@ helm:
 
   # 開發環境使用 values-dev.yaml，正式環境使用 values-custom.yaml
   valuesFiles:
-    - values-dev.yaml      # 開發環境（包含完整預設值）
-    # - values-custom.yaml # 正式環境（只包含自訂值）
+    # - values-dev.yaml      # 開發環境（包含完整預設值）
+    - values-custom.yaml # 正式環境（只包含自訂值）
 
   valuesFrom:
     - secretKeyRef:
