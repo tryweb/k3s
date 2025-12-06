@@ -21,6 +21,11 @@ librenms:
           name: librenms-redis-secret
           key: redis-password
 
+  # Frontend 持久化儲存 (預設: 1Gi, storageClassName: "")
+  frontend:
+    persistence:
+      storageClassName: "nfs-client"
+
   # Poller 配置 (預設: 2)
   poller:
     replicas: 3
