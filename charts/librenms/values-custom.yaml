@@ -22,9 +22,10 @@ librenms:
           key: redis-password
 
   # Frontend 持久化儲存 (預設: 1Gi, storageClassName: "")
-  frontend:
-    persistence:
-      storageClassName: "nfs-client"
+  #frontend:
+  #  persistence:
+  #    storageClassName: "nfs-client"
+  # chart 7.0.1 移除這設定
 
   # Poller 配置 (預設: 2)
   poller:
