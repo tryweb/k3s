@@ -1,0 +1,333 @@
+---
+# 1. 建立 ConfigMap 存放 Discord Webhook URL
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: discord-webhook-config
+  namespace: system-upgrade
+data:
+  webhook-url: "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN"
+  # 替換成你的 Discord Webhook URL
+
+---
+# 2. 建立通知腳本的 ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: discord-notifier-script
+  namespace: system-upgrade
+data:
+  notify.sh: |
+    #!/bin/sh
+    
+    WEBHOOK_URL="$1"
+    TITLE="$2"
+    MESSAGE="$3"
+    COLOR="$4"  # success: 3066993 (green), failure: 15158332 (red), info: 3447003 (blue)
+    
+    # 取得叢集資訊
+    CLUSTER_NAME="${CLUSTER_NAME:-K3s Cluster}"
+    TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    
+    # 建立 Discord Embed JSON
+    PAYLOAD=$(cat <<EOF
+    {
+      "embeds": [{
+        "title": "${TITLE}",
+        "description": "${MESSAGE}",
+        "color": ${COLOR},
+        "timestamp": "${TIMESTAMP}",
+        "footer": {
+          "text": "${CLUSTER_NAME}"
+        },
+        "fields": [
+          {
+            "name": "節點",
+            "value": "${NODE_NAME:-Unknown}",
+            "inline": true
+          },
+          {
+            "name": "計畫",
+            "value": "${PLAN_NAME:-Unknown}",
+            "inline": true
+          }
+        ]
+      }]
+    }
+    EOF
+    )
+    
+    # 發送到 Discord
+    curl -H "Content-Type: application/json" \
+         -d "$PAYLOAD" \
+         "$WEBHOOK_URL"
+
+---
+# 3. 建立監控 Job 的 ServiceAccount 和權限
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: upgrade-notifier
+  namespace: system-upgrade
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: upgrade-notifier
+  namespace: system-upgrade
+rules:
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: upgrade-notifier
+  namespace: system-upgrade
+subjects:
+- kind: ServiceAccount
+  name: upgrade-notifier
+  namespace: system-upgrade
+roleRef:
+  kind: Role
+  name: upgrade-notifier
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# 4. 部署監控器 Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k3s-upgrade-notifier
+  namespace: system-upgrade
+  labels:
+    app: k3s-upgrade-notifier
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: k3s-upgrade-notifier
+  template:
+    metadata:
+      labels:
+        app: k3s-upgrade-notifier
+    spec:
+      serviceAccountName: upgrade-notifier
+      containers:
+      - name: notifier
+        image: bitnami/kubectl:latest
+        env:
+        - name: WEBHOOK_URL
+          valueFrom:
+            configMapKeyRef:
+              name: discord-webhook-config
+              key: webhook-url
+        - name: CLUSTER_NAME
+          value: "我的 K3s 叢集"  # 自訂你的叢集名稱
+        command:
+        - /bin/bash
+        - -c
+        - |
+          #!/bin/bash
+          
+          # 載入通知腳本
+          cat > /tmp/notify.sh << 'SCRIPT_EOF'
+          #!/bin/bash
+          WEBHOOK_URL="$1"
+          TITLE="$2"
+          MESSAGE="$3"
+          COLOR="$4"
+          CLUSTER_NAME="${CLUSTER_NAME:-K3s Cluster}"
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          
+          PAYLOAD=$(cat <<EOF
+          {
+            "embeds": [{
+              "title": "${TITLE}",
+              "description": "${MESSAGE}",
+              "color": ${COLOR},
+              "timestamp": "${TIMESTAMP}",
+              "footer": {
+                "text": "${CLUSTER_NAME}"
+              },
+              "fields": [
+                {
+                  "name": "節點",
+                  "value": "${NODE_NAME:-Unknown}",
+                  "inline": true
+                },
+                {
+                  "name": "計畫",
+                  "value": "${PLAN_NAME:-Unknown}",
+                  "inline": true
+                },
+                {
+                  "name": "版本",
+                  "value": "${VERSION:-Unknown}",
+                  "inline": true
+                }
+              ]
+            }]
+          }
+          EOF
+          )
+          
+          curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$WEBHOOK_URL"
+          SCRIPT_EOF
+          
+          chmod +x /tmp/notify.sh
+          
+          echo "開始監控 K3s 升級任務..."
+          
+          # 用於追蹤已處理的 Job
+          declare -A processed_jobs
+          
+          while true; do
+            # 列出所有升級相關的 Job
+            JOBS=$(kubectl get jobs -n system-upgrade \
+              -l upgrade.cattle.io/plan \
+              -o json 2>/dev/null)
+            
+            if [ -z "$JOBS" ]; then
+              sleep 30
+              continue
+            fi
+            
+            # 處理每個 Job
+            echo "$JOBS" | jq -r '.items[] | @base64' | while read -r job; do
+              _jq() {
+                echo "${job}" | base64 -d | jq -r "${1}"
+              }
+              
+              JOB_NAME=$(_jq '.metadata.name')
+              PLAN_NAME=$(_jq '.metadata.labels["upgrade.cattle.io/plan"]')
+              NODE_NAME=$(_jq '.metadata.labels["upgrade.cattle.io/node"]')
+              
+              # 如果已處理過，跳過
+              if [ "${processed_jobs[$JOB_NAME]}" = "1" ]; then
+                continue
+              fi
+              
+              # 檢查 Job 狀態
+              SUCCEEDED=$(_jq '.status.succeeded // 0')
+              FAILED=$(_jq '.status.failed // 0')
+              ACTIVE=$(_jq '.status.active // 0')
+              
+              # 取得版本資訊
+              VERSION=$(kubectl get plan $PLAN_NAME -n system-upgrade -o jsonpath='{.status.latestVersion}' 2>/dev/null || echo "Unknown")
+              
+              export NODE_NAME PLAN_NAME VERSION
+              
+              if [ "$SUCCEEDED" -gt 0 ]; then
+                echo "✓ Job $JOB_NAME 成功"
+                /tmp/notify.sh "$WEBHOOK_URL" \
+                  "🎉 K3s 升級成功" \
+                  "節點 **${NODE_NAME}** 已成功升級到版本 **${VERSION}**" \
+                  "3066993"
+                processed_jobs[$JOB_NAME]=1
+                
+              elif [ "$FAILED" -gt 0 ]; then
+                echo "✗ Job $JOB_NAME 失敗"
+                
+                # 取得錯誤日誌
+                POD_NAME=$(kubectl get pods -n system-upgrade \
+                  -l job-name=$JOB_NAME \
+                  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+                
+                ERROR_LOG="無法取得錯誤日誌"
+                if [ -n "$POD_NAME" ]; then
+                  ERROR_LOG=$(kubectl logs -n system-upgrade $POD_NAME --tail=10 2>/dev/null | tail -3)
+                fi
+                
+                /tmp/notify.sh "$WEBHOOK_URL" \
+                  "❌ K3s 升級失敗" \
+                  "節點 **${NODE_NAME}** 升級失敗\n\`\`\`\n${ERROR_LOG}\n\`\`\`" \
+                  "15158332"
+                processed_jobs[$JOB_NAME]=1
+                
+              elif [ "$ACTIVE" -gt 0 ]; then
+                # 只在首次檢測到時通知
+                if [ "${processed_jobs[${JOB_NAME}_started]}" != "1" ]; then
+                  echo "→ Job $JOB_NAME 開始執行"
+                  /tmp/notify.sh "$WEBHOOK_URL" \
+                    "🔄 K3s 升級開始" \
+                    "節點 **${NODE_NAME}** 開始升級到版本 **${VERSION}**" \
+                    "3447003"
+                  processed_jobs[${JOB_NAME}_started]=1
+                fi
+              fi
+            done
+            
+            sleep 30
+          done
+      restartPolicy: Always
+
+---
+# 5. (可選) 使用 CronJob 定期檢查並通知當前狀態
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: k3s-version-reporter
+  namespace: system-upgrade
+spec:
+  schedule: "0 9 * * 1"  # 每週一早上 9 點報告
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: upgrade-notifier
+          containers:
+          - name: reporter
+            image: bitnami/kubectl:latest
+            env:
+            - name: WEBHOOK_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: discord-webhook-config
+                  key: webhook-url
+            - name: CLUSTER_NAME
+              value: "我的 K3s 叢集"
+            command:
+            - /bin/bash
+            - -c
+            - |
+              #!/bin/bash
+              
+              # 收集所有節點版本資訊
+              NODES_INFO=$(kubectl get nodes -o json | jq -r '.items[] | 
+                "**" + .metadata.name + "**: `" + .status.nodeInfo.kubeletVersion + "`"' | 
+                paste -sd '\n' -)
+              
+              # 檢查 Plan 狀態
+              PLANS_INFO=$(kubectl get plans -n system-upgrade -o json | jq -r '.items[] | 
+                "**" + .metadata.name + "**: " + (.status.latestVersion // "Unknown")' | 
+                paste -sd '\n' -)
+              
+              MESSAGE="**節點版本:**\n${NODES_INFO}\n\n**升級計畫:**\n${PLANS_INFO}"
+              
+              PAYLOAD=$(cat <<EOF
+              {
+                "embeds": [{
+                  "title": "📊 K3s 叢集狀態報告",
+                  "description": "${MESSAGE}",
+                  "color": 3447003,
+                  "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+                  "footer": {
+                    "text": "${CLUSTER_NAME}"
+                  }
+                }]
+              }
+              EOF
+              )
+              
+              curl -H "Content-Type: application/json" -d "$PAYLOAD" "$WEBHOOK_URL"
+          restartPolicy: OnFailure
