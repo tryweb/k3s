@@ -34,7 +34,7 @@ helm:
   # 注意：可使用 values-custom.yaml（chart 會自動套用預設值）
   repo: https://www.librenms.org/helm-charts
   chart: librenms
-  version: "6.1.0"
+  # version: "6.1.0"
 
   # ============================================================
 
