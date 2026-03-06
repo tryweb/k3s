@@ -86,6 +86,12 @@ rules:
 - apiGroups: [""]
   resources: ["pods/log"]
   verbs: ["get"]
+- apiGroups: ["upgrade.cattle.io"]
+  resources: ["plans"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -122,6 +128,9 @@ spec:
         app: k3s-upgrade-notifier
     spec:
       serviceAccountName: upgrade-notifier
+      volumes:
+      - name: notifier-state
+        emptyDir: {}
       containers:
       - name: notifier
         image: bitnami/kubectl:latest
@@ -133,6 +142,9 @@ spec:
               key: webhook-url
         - name: CLUSTER_NAME
           value: "我的 K3s 叢集"  # 自訂你的叢集名稱
+        volumeMounts:
+        - name: notifier-state
+          mountPath: /var/lib/notifier
         command:
         - /bin/bash
         - -c
@@ -142,56 +154,65 @@ spec:
           # 載入通知腳本
           cat > /tmp/notify.sh << 'SCRIPT_EOF'
           #!/bin/bash
-          WEBHOOK_URL="$1"
-          TITLE="$2"
-          MESSAGE="$3"
-          COLOR="$4"
-          CLUSTER_NAME="${CLUSTER_NAME:-K3s Cluster}"
-          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+           WEBHOOK_URL="$1"
+           TITLE="$2"
+           MESSAGE="$3"
+           COLOR="$4"
+           CLUSTER_NAME="${CLUSTER_NAME:-K3s Cluster}"
+           TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           
-          PAYLOAD=$(cat <<EOF
-          {
-            "embeds": [{
-              "title": "${TITLE}",
-              "description": "${MESSAGE}",
-              "color": ${COLOR},
-              "timestamp": "${TIMESTAMP}",
-              "footer": {
-                "text": "${CLUSTER_NAME}"
-              },
-              "fields": [
-                {
-                  "name": "節點",
-                  "value": "${NODE_NAME:-Unknown}",
-                  "inline": true
-                },
-                {
-                  "name": "計畫",
-                  "value": "${PLAN_NAME:-Unknown}",
-                  "inline": true
-                },
-                {
-                  "name": "版本",
-                  "value": "${VERSION:-Unknown}",
-                  "inline": true
-                }
-              ]
-            }]
-          }
-          EOF
-          )
+          PAYLOAD=$(jq -n \
+            --arg title "$TITLE" \
+            --arg description "$MESSAGE" \
+            --arg timestamp "$TIMESTAMP" \
+            --arg footer "$CLUSTER_NAME" \
+            --arg node "${NODE_NAME:-Unknown}" \
+            --arg plan "${PLAN_NAME:-Unknown}" \
+            --arg version "${VERSION:-Unknown}" \
+            --argjson color "$COLOR" \
+            '{
+              embeds: [{
+                title: $title,
+                description: $description,
+                color: $color,
+                timestamp: $timestamp,
+                footer: { text: $footer },
+                fields: [
+                  { name: "節點", value: $node, inline: true },
+                  { name: "計畫", value: $plan, inline: true },
+                  { name: "版本", value: $version, inline: true }
+                ]
+              }]
+            }')
           
           curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$WEBHOOK_URL"
           SCRIPT_EOF
           
-          chmod +x /tmp/notify.sh
-          
-          echo "開始監控 K3s 升級任務..."
-          
-          # 用於追蹤已處理的 Job
-          declare -A processed_jobs
-          
-          while true; do
+           chmod +x /tmp/notify.sh
+           
+           echo "開始監控 K3s 升級任務..."
+           
+           # 用於追蹤已處理的 Job
+           declare -A processed_jobs
+           STATE_FILE="/var/lib/notifier/processed_jobs.txt"
+           mkdir -p /var/lib/notifier
+           touch "$STATE_FILE"
+
+           while IFS= read -r processed_key; do
+             if [ -n "$processed_key" ]; then
+               processed_jobs["$processed_key"]=1
+             fi
+           done < "$STATE_FILE"
+
+           mark_processed() {
+             local key="$1"
+             if [ -n "$key" ] && [ "${processed_jobs[$key]}" != "1" ]; then
+               processed_jobs["$key"]=1
+               printf '%s\n' "$key" >> "$STATE_FILE"
+             fi
+           }
+           
+           while true; do
             # 列出所有升級相關的 Job
             JOBS=$(kubectl get jobs -n system-upgrade \
               -l upgrade.cattle.io/plan \
@@ -203,14 +224,22 @@ spec:
             fi
             
             # 處理每個 Job
-            echo "$JOBS" | jq -r '.items[] | @base64' | while read -r job; do
-              _jq() {
-                echo "${job}" | base64 -d | jq -r "${1}"
-              }
-              
-              JOB_NAME=$(_jq '.metadata.name')
-              PLAN_NAME=$(_jq '.metadata.labels["upgrade.cattle.io/plan"]')
-              NODE_NAME=$(_jq '.metadata.labels["upgrade.cattle.io/node"]')
+             while read -r job; do
+               _jq() {
+                 echo "${job}" | base64 -d | jq -r "${1}"
+               }
+               
+               JOB_NAME=$(_jq '.metadata.name')
+               PLAN_NAME=$(_jq '.metadata.labels["upgrade.cattle.io/plan"]')
+               NODE_NAME=$(_jq '.metadata.labels["upgrade.cattle.io/node"]')
+
+               if [ -z "$PLAN_NAME" ] || [ "$PLAN_NAME" = "null" ]; then
+                 PLAN_NAME="Unknown"
+               fi
+
+               if [ -z "$NODE_NAME" ] || [ "$NODE_NAME" = "null" ]; then
+                 NODE_NAME="Unknown"
+               fi
               
               # 如果已處理過，跳過
               if [ "${processed_jobs[$JOB_NAME]}" = "1" ]; then
@@ -223,19 +252,25 @@ spec:
               ACTIVE=$(_jq '.status.active // 0')
               
               # 取得版本資訊
-              VERSION=$(kubectl get plan $PLAN_NAME -n system-upgrade -o jsonpath='{.status.latestVersion}' 2>/dev/null || echo "Unknown")
-              
-              export NODE_NAME PLAN_NAME VERSION
+               VERSION="Unknown"
+               if [ "$PLAN_NAME" != "Unknown" ]; then
+                 PLAN_JSON=$(kubectl get plan "$PLAN_NAME" -n system-upgrade -o json 2>/dev/null || true)
+                 if [ -n "$PLAN_JSON" ]; then
+                   VERSION=$(echo "$PLAN_JSON" | jq -r '.status.latestVersion // .spec.version // "Unknown"')
+                 fi
+               fi
+               
+               export NODE_NAME PLAN_NAME VERSION
               
               if [ "$SUCCEEDED" -gt 0 ]; then
                 echo "✓ Job $JOB_NAME 成功"
-                /tmp/notify.sh "$WEBHOOK_URL" \
-                  "🎉 K3s 升級成功" \
-                  "節點 **${NODE_NAME}** 已成功升級到版本 **${VERSION}**" \
-                  "3066993"
-                processed_jobs[$JOB_NAME]=1
-                
-              elif [ "$FAILED" -gt 0 ]; then
+                 /tmp/notify.sh "$WEBHOOK_URL" \
+                   "🎉 K3s 升級成功" \
+                   "節點 **${NODE_NAME}** 已成功升級到版本 **${VERSION}**" \
+                   "3066993"
+                 mark_processed "$JOB_NAME"
+                 
+               elif [ "$FAILED" -gt 0 ]; then
                 echo "✗ Job $JOB_NAME 失敗"
                 
                 # 取得錯誤日誌
@@ -248,24 +283,24 @@ spec:
                   ERROR_LOG=$(kubectl logs -n system-upgrade $POD_NAME --tail=10 2>/dev/null | tail -3)
                 fi
                 
-                /tmp/notify.sh "$WEBHOOK_URL" \
-                  "❌ K3s 升級失敗" \
-                  "節點 **${NODE_NAME}** 升級失敗\n\`\`\`\n${ERROR_LOG}\n\`\`\`" \
-                  "15158332"
-                processed_jobs[$JOB_NAME]=1
-                
-              elif [ "$ACTIVE" -gt 0 ]; then
-                # 只在首次檢測到時通知
-                if [ "${processed_jobs[${JOB_NAME}_started]}" != "1" ]; then
+                 /tmp/notify.sh "$WEBHOOK_URL" \
+                   "❌ K3s 升級失敗" \
+                   "節點 **${NODE_NAME}** 升級失敗\n\`\`\`\n${ERROR_LOG}\n\`\`\`" \
+                   "15158332"
+                 mark_processed "$JOB_NAME"
+                 
+               elif [ "$ACTIVE" -gt 0 ]; then
+                 # 只在首次檢測到時通知
+                 if [ "${processed_jobs[${JOB_NAME}_started]}" != "1" ]; then
                   echo "→ Job $JOB_NAME 開始執行"
-                  /tmp/notify.sh "$WEBHOOK_URL" \
-                    "🔄 K3s 升級開始" \
-                    "節點 **${NODE_NAME}** 開始升級到版本 **${VERSION}**" \
-                    "3447003"
-                  processed_jobs[${JOB_NAME}_started]=1
-                fi
-              fi
-            done
+                   /tmp/notify.sh "$WEBHOOK_URL" \
+                     "🔄 K3s 升級開始" \
+                     "節點 **${NODE_NAME}** 開始升級到版本 **${VERSION}**" \
+                     "3447003"
+                   mark_processed "${JOB_NAME}_started"
+                 fi
+               fi
+             done < <(echo "$JOBS" | jq -r '.items[] | @base64')
             
             sleep 30
           done
@@ -303,31 +338,37 @@ spec:
               #!/bin/bash
               
               # 收集所有節點版本資訊
-              NODES_INFO=$(kubectl get nodes -o json | jq -r '.items[] | 
+              NODES_INFO=$(kubectl get nodes -o json 2>/dev/null | jq -r '.items[] | 
                 "**" + .metadata.name + "**: `" + .status.nodeInfo.kubeletVersion + "`"' | 
                 paste -sd '\n' -)
+              if [ -z "$NODES_INFO" ]; then
+                NODES_INFO="(無法取得節點版本，請確認 RBAC 權限)"
+              fi
               
               # 檢查 Plan 狀態
-              PLANS_INFO=$(kubectl get plans -n system-upgrade -o json | jq -r '.items[] | 
-                "**" + .metadata.name + "**: " + (.status.latestVersion // "Unknown")' | 
+              PLANS_INFO=$(kubectl get plans -n system-upgrade -o json 2>/dev/null | jq -r '.items[] | 
+                "**" + .metadata.name + "**: " + (.status.latestVersion // .spec.version // "Unknown")' | 
                 paste -sd '\n' -)
+              if [ -z "$PLANS_INFO" ]; then
+                PLANS_INFO="(無法取得升級計畫版本，請確認 RBAC 權限)"
+              fi
               
               MESSAGE="**節點版本:**\n${NODES_INFO}\n\n**升級計畫:**\n${PLANS_INFO}"
               
-              PAYLOAD=$(cat <<EOF
-              {
-                "embeds": [{
-                  "title": "📊 K3s 叢集狀態報告",
-                  "description": "${MESSAGE}",
-                  "color": 3447003,
-                  "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
-                  "footer": {
-                    "text": "${CLUSTER_NAME}"
-                  }
-                }]
-              }
-              EOF
-              )
-              
+              PAYLOAD=$(jq -n \
+                --arg title "📊 K3s 叢集狀態報告" \
+                --arg description "$MESSAGE" \
+                --arg timestamp "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+                --arg footer "$CLUSTER_NAME" \
+                '{
+                  embeds: [{
+                    title: $title,
+                    description: $description,
+                    color: 3447003,
+                    timestamp: $timestamp,
+                    footer: { text: $footer }
+                  }]
+                }')
+                
               curl -H "Content-Type: application/json" -d "$PAYLOAD" "$WEBHOOK_URL"
           restartPolicy: OnFailure
